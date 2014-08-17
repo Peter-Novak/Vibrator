@@ -1,9 +1,9 @@
 /*
 ***********************************************************************************************************************************************************
 *                                                                                                                                                         *
-* NS001.mq4                                                                                                                                       *
+* NS001.mq4, verzija: 1.02                                                                                                                                *
 *                                                                                                                                                         *
-* Copyright july, august 2014, Peter Novak ml.                                                                                                                    *
+* Copyright july, august 2014, Peter Novak ml.                                                                                                            *
 ***********************************************************************************************************************************************************
 */
 /* Zgodovina verzij ---------------------------------------------------------------------------------------------------------------------------------------
@@ -23,6 +23,12 @@ NS001-demo-01.mq4 (verzija 1.01)
    
    Poleg tega v tej verziji uvajamo tudi mehanizem za zaustavitev algoritma: èe je spremenljivka zaustavitev nastavljena na 1, potem se algoritem po
    doseženem profitnem cilju ustavi. Èe je 0, nadaljuje s trgovanjem.
+
+NS001.mq4 (verzija 1.02)
+   Pri izraèunu vrednosti vseh pozicij naj se upošteva tudi Swap. Ta je pri nekaterih parih precejšen in je prav da ga upoštevamo.
+   Bistveno sem zmanjšal število vrstic izpisa na zaslon.
+   Dodal novo vrednost: dnevni inkrement. Èe profitni cilj ni dosežen veè kot 1 dan, potem se ga poveèa za dnevni inkrement.
+   
 --------------------------------------------------------------------------------------------------------------------------------------------------------*/
 
 
@@ -130,7 +136,8 @@ Algoritem deluje takole:
 extern string imeDatoteke;       // Identifikator datoteke
 extern int    maxSteviloPozicij; // Najveèje število pozicij
 extern double stopRazdalja;      // Razdalja med pozicijami
-extern double tpVrednost;        // Profitni cilj (EUR)
+extern double tpVrednost;        // Inicialni profitni cilj (EUR)
+extern double tpInkrement;       // Dnevni inkrement (EUR)
 extern int    uraKonca;          // Ura zaèetka trgovanja
 extern int    uraZacetka;        // Ura konca trgovanja
 extern int    restart;           // Restart 1 - DA, 0 - NE
@@ -153,6 +160,8 @@ extern int    zaustavitev;       // 1 - DA, 0 - NE
 
 
 // Globalne spremenljivke ---------------------------------------------------------------------------------------------------------------------------------
+double aktualnaTPVrednost;   // aktualni profitni cilj (tpVrednost poveèana za dnevne inkremente)
+int    dan;                  // številka dneva
 double izkupicekAlgoritma;   // trenutni izkupièek algoritma
 int    kazOdprtaProdajna;    // kazalec na naslednjo odprto prodajno pozicijo
 int    kazOdprtaNakupna;     // kazalec na naslednjo odprto nakupno pozicijo
@@ -160,6 +169,7 @@ int    nakPozicije[MAX_POZ]; // polje id-jev nakupnih pozicij
 int    proPozicije[MAX_POZ]; // polje id-jev prodajnih pozicij
 int    stanje;               // trenutno stanje DKA
 int    steviloPozicij;       // trenutno število pozicij
+double vrednostPozicij;      // vrednost vseh trenutno odprtih pozicij
 
 
 
@@ -217,16 +227,19 @@ Implementacija:
 int init()
 {
   Print( "****************************************************************************************************************" );
-  Print( "* Welcome on behalf of NS001, version 1.01. Let's f*** the biatch!                                             *" );
+  Print( "* Welcome on behalf of NS001, version 1.02. Let's f*** the biatch!                                             *" );
   Print( "****************************************************************************************************************" );
  
   double razdalja; 
   
   // inicializacija vseh globalnih spremenljivk
+  aktualnaTPVrednost = tpVrednost;
+  dan                = DayOfYear();
   izkupicekAlgoritma = 0;
   kazOdprtaNakupna   = 0;
   kazOdprtaProdajna  = 0;
   steviloPozicij     = 2;
+  vrednostPozicij    = 0;
 	
 	// èe smo algoritem restartali, potem inicializiramo algoritem na podlagi zapisa v datoteki. Po restartu postavimo restart na 0.
 	if( restart == 1 )
@@ -239,9 +252,16 @@ int init()
 	}
 	
    // èe smo izven trgovalnega èasa, potem gremo v stanje S3, sicer v S0 in odpremo zaèetni nabor pozicij
-   Print( "Ura: ", TimeHour( TimeCurrent() ), " Minuta: ", TimeMinute( TimeCurrent() ) );
+   // Print( "Ura: ", TimeHour( TimeCurrent() ), " Minuta: ", TimeMinute( TimeCurrent() ) );
    if( TrgovalnoObdobje() == true ) { stanje = S0; } else { Print( "Trenutno smo izven trgovalnega èasa - èakamo, da napoèi naš èas..." ); stanje = S3; return( S3 ); }
-   
+	
+	// inicializacija vrednosti polj pozicij
+	for( int j = 0; j < MAX_POZ; j++ )
+	{
+	   nakPozicije[ j ] = 0;
+	   proPozicije[ j ] = 0;
+	}
+	
 	// odpiranje zaèetnega nabora pozicij
 	razdalja = stopRazdalja;
 	for( int i = 0; i < steviloPozicij; i++)
@@ -293,8 +313,27 @@ int start()
       Print( "NS001::start::OPOZORILO: Stanje ", stanje, " ni veljavno stanje - preveri pravilnost delovanja algoritma." );
   }
 
+  // zabeležimo stanje algoritma, èe je prišlo do prehoda med stanji
   if( trenutnoStanje != stanje ) 
-  { IzbrisiDatoteko( imeDatoteke ); ShraniStanje( imeDatoteke ); Print( "Prehod: ", ImeStanja( trenutnoStanje ), " -----> ", ImeStanja( stanje ) ); }
+  { 
+    IzbrisiDatoteko( imeDatoteke ); ShraniStanje( imeDatoteke ); 
+    Print( "Prehod: ", ImeStanja( trenutnoStanje ), " -----> ", ImeStanja( stanje ) ); 
+  }
+  
+  // èe je napoèil nov dan, potem poveèamo profitni cilj za dnevni inkrement in shranimo stanje algoritma
+  if( dan != DayOfYear() ) 
+  { 
+    aktualnaTPVrednost = aktualnaTPVrednost + tpInkrement; dan = DayOfYear(); 
+    IzbrisiDatoteko( imeDatoteke ); ShraniStanje( imeDatoteke ); 
+    Print( "Profitni cilj poveèan za dnevni inkrement: ", DoubleToString( tpInkrement, 2 ), " EUR in zdaj znaša ", DoubleToString( aktualnaTPVrednost, 2 ), " EUR." ); 
+  }
+  
+  // izpis kljuènih parametrov algoritma na zaslonu
+  Comment( "Izkupicek algoritma: ",       DoubleToString( izkupicekAlgoritma, 2                   ), " EUR\n", 
+           "Trenutna vrednost pozicij: ", DoubleToString( vrednostPozicij,    2                   ), " EUR\n" 
+           "Skupno stanje: ",             DoubleToString( vrednostPozicij + izkupicekAlgoritma, 2 ), " EUR\n",
+           "Cilj: ",                      DoubleToString( aktualnaTPVrednost, 2                   ), " EUR\n"
+           );
   
   return( USPEH );
 } // start
@@ -553,6 +592,7 @@ int PreberiStanje( string ime )
 {
   int    rocajDatoteke;
   string polnoIme;
+  string spisekPozicij;
 
   polnoIme      = "NS001-" + ime + ".dat";
   
@@ -588,19 +628,28 @@ int PreberiStanje( string ime )
     Print( "Trenutno število pozicij [steviloPozicij]: ",             steviloPozicij );
         
     // polji nakupnih in prodajnih pozicij
-    Print( "Nakupne pozicije: " );
+    spisekPozicij = "Nakupne pozicije: ";
     for( int i = 0; i < MAX_POZ; i++ )
     {
       nakPozicije[ i ] = FileReadInteger( rocajDatoteke, INT_VALUE ); 
-      Print( nakPozicije[ i ] ); 
+      if( nakPozicije[ i ] != 0 ) { spisekPozicij = spisekPozicij + IntegerToString( nakPozicije[ i ] ) + ", "; }
     }
-    Print( "Prodajne pozicije: " );
+    Print( StringSubstr( spisekPozicij, 0, StringLen( spisekPozicij ) - 2 ) );
+    
+    spisekPozicij = "Prodajne pozicije: ";
     for( int j = 0; j < MAX_POZ; j++ )
     {
       proPozicije[ j ] = FileReadInteger( rocajDatoteke, INT_VALUE ); 
-      Print( proPozicije[ j ] );
+      if( proPozicije[ j ] != 0 ) { spisekPozicij = spisekPozicij + IntegerToString( proPozicije[ j ] ) + ", "; }
     }
+    Print( StringSubstr( spisekPozicij, 0, StringLen( spisekPozicij ) - 2 ) );
  
+    // dnevni inkrement in aktualna TP vrednost
+    tpInkrement         = FileReadDouble( rocajDatoteke, DOUBLE_VALUE  );
+    Print( "Dnevni inkrement [tpInkrement]: ", tpInkrement );
+    aktualnaTPVrednost  = FileReadDouble( rocajDatoteke, DOUBLE_VALUE  );
+    Print( "Aktualna TP vrednost [aktualnaTPVrednost]: ", aktualnaTPVrednost );
+    
     FileClose( rocajDatoteke );
     return( stanje );
   }
@@ -650,52 +699,81 @@ Implementacija:
 int ShraniStanje( string ime )
 {
   int    rocajDatoteke;
+  int    count;
   string polnoIme;
+  string spisekPozicij;
+  string vrsticaStanja1;
+  string vrsticaStanja2;
+  string vrsticaStanja3;
 
   polnoIme      = "NS001-" + ime + ".dat";
   rocajDatoteke = FileOpen( polnoIme, FILE_WRITE|FILE_BIN );
   
   if( rocajDatoteke != INVALID_HANDLE)
   {
-    Print( "Zapisovanje stanja algoritma v datoteko", polnoIme, ": " );
-    Print( "----------------------------------------" );
-    Print( "Najveèje število pozicij [maxSteviloPozicij]: ",       maxSteviloPozicij );
+    Print( "Zapisovanje stanja algoritma v datoteko ", polnoIme, ": -------------------------------------------------------------------------" );
+    vrsticaStanja1 = "Najveèje število pozicij [maxSteviloPozicij]: " + IntegerToString( maxSteviloPozicij ) + " \\ ";
     FileWriteInteger( rocajDatoteke,                               maxSteviloPozicij );
-    Print( "Razdalja med pozicijami [stopRazdalja]: ",                  stopRazdalja );
+    vrsticaStanja1 = vrsticaStanja1 + "Razdalja med pozicijami [stopRazdalja]: " + DoubleToString( stopRazdalja, 5 ) + " \\ ";
     FileWriteDouble ( rocajDatoteke,                                    stopRazdalja );
-    Print( "Profitni cilj (EUR) [tpVrednost]: ",                          tpVrednost );
+    Print( "Profitni cilj (EUR) [tpVrednost]: ", DoubleToString( tpVrednost, 2 ), " EUR" );
     FileWriteDouble ( rocajDatoteke,                                      tpVrednost );
-    Print( "Ura konca trgovanja [uraKonca]: ",                              uraKonca );
+    vrsticaStanja1 = vrsticaStanja1 + "Ura konca trgovanja [uraKonca]: " + IntegerToString( uraKonca ) + " \\ ";
     FileWriteInteger( rocajDatoteke,                                        uraKonca );
-    Print( "Ura zaèetka trgovanja [uraZacetka]: ",                        uraZacetka );
+    vrsticaStanja1 = vrsticaStanja1 + "Ura zaèetka trgovanja [uraZacetka]: " + IntegerToString( uraZacetka ) + " \\ ";
     FileWriteInteger( rocajDatoteke,                                      uraZacetka );
-    Print( "Velikost pozicij (v lotih) [velikostPozicij]: ",         velikostPozicij );
+    vrsticaStanja2 = "Velikost pozicij (v lotih) [velikostPozicij]: " + DoubleToString( velikostPozicij, 2 ) + " \\ ";
     FileWriteDouble ( rocajDatoteke,                                 velikostPozicij );
-    Print( "Trenutni izkupièek algoritma [izkupicekAlgoritma]: ", izkupicekAlgoritma );
+    Print( "Trenutni izkupièek algoritma [izkupicekAlgoritma]: ", DoubleToString( izkupicekAlgoritma, 2 ), " EUR" );
     FileWriteDouble ( rocajDatoteke,                              izkupicekAlgoritma );
-    Print( "Kazalec na odprto prodajno [kazOdprtaProdajna]: ",     kazOdprtaProdajna );
+    vrsticaStanja2 = vrsticaStanja2 + "Kazalec na odprto prodajno [kazOdprtaProdajna]: " + IntegerToString( kazOdprtaProdajna ) + " \\ ";
     FileWriteInteger( rocajDatoteke,                               kazOdprtaProdajna );
-    Print( "Kazalec na odprto nakupno [kazOdprtaNakupna]: ",        kazOdprtaNakupna );
+    vrsticaStanja2 = vrsticaStanja2 + "Kazalec na odprto nakupno [kazOdprtaNakupna]: " + IntegerToString( kazOdprtaNakupna ) + " \\ ";
     FileWriteInteger( rocajDatoteke,                                kazOdprtaNakupna );
-    Print( "Stanje algoritma [stanje]: ",                                     stanje );
+    vrsticaStanja3 = "Stanje algoritma [stanje]: " + ImeStanja( stanje ) + " \\ ";
     FileWriteInteger( rocajDatoteke,                                          stanje );
-    Print( "Trenutno število pozicij [steviloPozicij]: ",             steviloPozicij );
+    vrsticaStanja3 = vrsticaStanja3 + "Trenutno število pozicij [steviloPozicij]: " + IntegerToString( steviloPozicij ) + " \\ ";
     FileWriteInteger( rocajDatoteke,                                  steviloPozicij );
+    Print( vrsticaStanja1 );
+    Print( vrsticaStanja2 );
+    Print( vrsticaStanja3 );
     
     // polji nakupnih in prodajnih pozicij
-    Print( "Nakupne pozicije: " );
+    count = 4;
+    spisekPozicij = "Nakupne pozicije: ";
     for( int i = 0; i < MAX_POZ; i++ )
     {
-      Print( nakPozicije[ i ] );
+      if( nakPozicije[ i ] != 0 ) 
+      { 
+        spisekPozicij = spisekPozicij + IntegerToString( nakPozicije[ i ] ) + ", ";
+        count--;
+        if( count == 0 ) { Print( spisekPozicij ); count = 4; spisekPozicij = "                   "; }
+      }
       FileWriteInteger( rocajDatoteke, nakPozicije[ i ] ); 
     }
-    Print( "Prodajne pozicije: " );
+    if( count != 4 ) { Print( StringSubstr( spisekPozicij, 0, StringLen( spisekPozicij ) - 2 ) ); }
+   
+    count = 4;
+    spisekPozicij = "Prodajne pozicije: ";
     for( int j = 0; j < MAX_POZ; j++ )
     {
-      Print( proPozicije[ j ] );
+      if( proPozicije[ j ] != 0 ) 
+      { 
+        spisekPozicij = spisekPozicij + IntegerToString( proPozicije[ j ] ) + ", "; 
+        count--;
+        if( count == 0 ) { Print( spisekPozicij ); count = 4; spisekPozicij = "                   "; }
+      }
       FileWriteInteger( rocajDatoteke, proPozicije[ j ] ); 
     }
- 
+    if( count != 4 ) { Print( StringSubstr( spisekPozicij, 0, StringLen( spisekPozicij ) - 2 ) ); }
+    
+    // dnevni inkrement in aktualniTP
+    FileWriteDouble ( rocajDatoteke,                                    tpInkrement );
+    vrsticaStanja1 = "Dnevni inkrement [tpInkrement]: " + DoubleToString( tpInkrement, 2 ) + " EUR" + " \\ ";
+    FileWriteDouble ( rocajDatoteke,                             aktualnaTPVrednost );
+    vrsticaStanja1 = vrsticaStanja1 + "Aktualna TP vrednost [aktualnaTPVrednost]: " + DoubleToString( aktualnaTPVrednost, 2 ) + " EUR";
+    Print( vrsticaStanja1 );
+    
     FileClose( rocajDatoteke );
     return( USPEH );
   }
@@ -796,7 +874,7 @@ double VrednostPozicije( int Id )
   Rezultat = OrderSelect( Id, SELECT_BY_TICKET );
   if( Rezultat == false ) 
     { Print( "NS001::ZapriPozicijo::OPOZORILO: Pozicije ", Id, " ni bilo mogoèe najti. Preveri pravilnost delovanja algoritma." ); return( 0 ); }
-  return( OrderProfit() );
+  return( OrderProfit() + OrderSwap() );
 } // VrednostPozicije
 
 
@@ -825,6 +903,7 @@ double VrednostOdprtihPozicij()
 
   for( int i = kazOdprtaNakupna;  i < steviloPozicij; i++ ) { vrednost = vrednost + VrednostPozicije( nakPozicije[ i ] ); }
   for( int j = kazOdprtaProdajna; j < steviloPozicij; j++ ) { vrednost = vrednost + VrednostPozicije( proPozicije[ j ] ); }
+  vrednostPozicij = vrednost; // vrednost shranimo tudi v globalno spremenljivko, da zmanjšamo število klicev funkcije
   return( vrednost );
 } // VrednostOdprtihPozicij
 
@@ -978,7 +1057,7 @@ int StanjeS1()
 {
   // prehod v fazo INICIALIZACIJA
   double vrednost = VrednostOdprtihPozicij();
-  if( ( vrednost + izkupicekAlgoritma ) > tpVrednost ) 
+  if( ( vrednost + izkupicekAlgoritma ) > aktualnaTPVrednost ) 
   { 
     for( int i = kazOdprtaNakupna;  i < steviloPozicij; i++ ) { ZapriPozicijo( nakPozicije[ i ] ); }
     for( int j = 0;                 j < steviloPozicij; j++ ) { ZapriPozicijo( proPozicije[ j ] ); }  // ker moramo poèistiti nadomestne sell orderje
@@ -1037,7 +1116,7 @@ int StanjeS2()
 {
   // prehod v fazo INICIALIZACIJA
   double vrednost = VrednostOdprtihPozicij();
-  if( ( vrednost + izkupicekAlgoritma ) > tpVrednost ) 
+  if( ( vrednost + izkupicekAlgoritma ) > aktualnaTPVrednost ) 
   { 
     for( int i = 0;                 i < steviloPozicij; i++ ) { ZapriPozicijo( nakPozicije[ i ] ); } // ker moramo poèistiti nadomestne buy orderje
     for( int j = kazOdprtaProdajna; j < steviloPozicij; j++ ) { ZapriPozicijo( proPozicije[ j ] ); }
