@@ -1,7 +1,7 @@
 /*
 ***********************************************************************************************************************************************************
 *                                                                                                                                                         *
-* NS001.mq4, verzija: 1.02                                                                                                                                *
+* NS001.mq4, verzija: 1.03                                                                                                                              *
 *                                                                                                                                                         *
 * Copyright july, august 2014, Peter Novak ml.                                                                                                            *
 ***********************************************************************************************************************************************************
@@ -29,6 +29,11 @@ NS001.mq4 (verzija 1.02)
    Bistveno sem zmanjšal število vrstic izpisa na zaslon.
    Dodal novo vrednost: dnevni inkrement. Èe profitni cilj ni dosežen veè kot 1 dan, potem se ga poveèa za dnevni inkrement.
    
+NS001.mq4 (verzija 1.03)
+   Prejšnja verzija deluje odlièno. Problem je edino premajhna profitabilnost glede na drawdown, ki ga lahko povzroèi. Zato bi algoritem uporabil kot 
+   sejalca novih pozicij - equity milipede oziroma stonogo. Izraèun profitnega cilja prilagodim tako, da vedno zaprem vse pozicije razen ene. Ta ostane 
+   odprta za vedno in predstavlja eno nogo stonogice.
+   
 --------------------------------------------------------------------------------------------------------------------------------------------------------*/
 
 
@@ -39,15 +44,6 @@ NS001.mq4 (verzija 1.02)
 
 
 /* NS001
-Še ena v seriji norih idej, vendar pa bi ta znala biti celo uspešna. Vhodni parametri algoritma so naslednji:
-	
-	- ciljni dobièek (tpVrednost): vrednost v EUR pri kateri poberemo dobièek.
-	- restart (restart): vrednost 1 pomeni da naj se algoritem inicializira na podlagi datoteke, vrednost 0 pomeni nov zaèetek.
-	- število pozicij (maxSteviloPozicij): število pozicij v nasprotnih smereh, ki jih odpremo.
-	- velikost pozicij (velikostPozicij): velikost vsake od pozicij v lotih.
-	- stop loss (stopRazdalja): standardna razdalja za stop loss, ki je obenem tudi razdalja med ravnemi.
-	- zaustavitev: vrednost 1 pomeni, da se algoritem po doseženem profitnem cilju zaustavi, vrednost 0 pa da zaène takoj slediti nov profitni cilj.
- 
 	
 Algoritem deluje takole:
 	
@@ -227,7 +223,7 @@ Implementacija:
 int init()
 {
   Print( "****************************************************************************************************************" );
-  Print( "* Welcome on behalf of NS001, version 1.02. Let's f*** the biatch!                                             *" );
+  Print( "* Welcome on behalf of NS001, version 1.03. Let's f*** the biatch!                                             *" );
   Print( "****************************************************************************************************************" );
  
   double razdalja; 
@@ -429,20 +425,30 @@ Implementacija:
 --------------- */
 int OdpriNadomestnoPozicijo( int id )
 {
-  bool Rezultat1; // zaèasna spremenljivka za rezultat OrderSelect funkcije
-  int  Rezultat2; // zaèasna spremenljivka za rezultat OrderSend funkcije
+  bool Rezultat1 = false; // zaèasna spremenljivka za rezultat OrderSelect funkcije
+  int  Rezultat2 = -1;;   // zaèasna spremenljivka za rezultat OrderSend funkcije
  
   // poišèemo pozicijo, ki jo nadomešèamo
   Rezultat1 = OrderSelect( id, SELECT_BY_TICKET );
   if( Rezultat1 == false ) { Print( "OdpriNadomestnoPozicijo::NAPAKA: pozicije z oznako ni: ", id ); return( NAPAKA ); }
   else 
     { 
-      if( OrderType() == OP_BUY )  
-        { Rezultat2 = OrderSend( Symbol(), OP_BUYSTOP,  velikostPozicij, OrderOpenPrice(), 0, OrderStopLoss(), 0,  "NS001", 0, 0, Green );  }
-      if( OrderType() == OP_SELL ) 
-        { Rezultat2 = OrderSend( Symbol(), OP_SELLSTOP, velikostPozicij, OrderOpenPrice(), 0, OrderStopLoss(), 0,  "NS001", 0, 0, Green );  }
-      if( Rezultat2 == -1 ) { Print( "OdpriNadomestnoPozicijo::NAPAKA: neuspešno odpiranje nadomestne pozicije.", id ); return( NAPAKA ); } else { return( Rezultat2 ); }
+      do 
+      {
+        if( OrderType() == OP_BUY )  
+          { Rezultat2 = OrderSend( Symbol(), OP_BUYSTOP,  velikostPozicij, OrderOpenPrice(), 0, OrderStopLoss(), 0,  "NS001", 0, 0, Green );  }
+        if( OrderType() == OP_SELL ) 
+          { Rezultat2 = OrderSend( Symbol(), OP_SELLSTOP, velikostPozicij, OrderOpenPrice(), 0, OrderStopLoss(), 0,  "NS001", 0, 0, Green );  }
+        if( Rezultat2 == -1 ) 
+          { 
+            Print( "OdpriNadomestnoPozicijo::NAPAKA: neuspešno odpiranje nadomestne pozicije. Ponoven poskus èez 30s...", id );
+            Sleep( 30000 );
+            RefreshRates();
+          }
+      } 
+      while( Rezultat2 < 0 );
     }
+    return( Rezultat2 );
 } // OdpriNadomestnoPozicijo
 
 
@@ -477,13 +483,18 @@ int OdpriDodatniUkaz( int tip, int id )
   else 
     { 
       if( ( tip == OP_BUYLIMIT) || ( tip == OP_BUYSTOP ) ) { stop = OrderStopLoss() - stopRazdalja; } else { stop = OrderStopLoss() + stopRazdalja; }
-      Rezultat2 = OrderSend( Symbol(), tip,  velikostPozicij, OrderOpenPrice(), 0, stop, 0,  "NS001", 0, 0, Green );
-      if( Rezultat2 == -1 ) 
-      { 
-        Print( "OdpriDodatniUkaz::NAPAKA: neuspešno odpiranje dodatne pozicije.", id ); 
-        return( NAPAKA ); 
-      } else 
-      { return( Rezultat2 ); }
+      do
+        {
+          Rezultat2 = OrderSend( Symbol(), tip,  velikostPozicij, OrderOpenPrice(), 0, stop, 0,  "NS001", 0, 0, Green );
+          if( Rezultat2 == -1 ) 
+          { 
+            Print( "OdpriDodatniUkaz::NAPAKA: neuspešno odpiranje dodatne pozicije. Ponoven poskus èez 30s..." ); 
+            Sleep( 30000 );
+            RefreshRates();
+          }
+        }
+      while( Rezultat2 == -1 );
+      return( Rezultat2 ); 
     }
 } // OdpriDodatniUkaz
 
@@ -516,10 +527,54 @@ int OdpriPozicijo( int Smer, double razdalja )
 {
   int Rezultat;
  
-  if( Smer == OP_BUY ) { Rezultat = OrderSend( Symbol(), OP_BUY,  velikostPozicij, Ask, 0, Ask - razdalja, 0, "NS001", 0, 0, Green ); }
-  else                 { Rezultat = OrderSend( Symbol(), OP_SELL, velikostPozicij, Bid, 0, Bid + razdalja, 0, "NS001", 0, 0, Red   ); }
-  if( Rezultat == -1 ) { return( NAPAKA ); } else { return( Rezultat ); }
+  do
+    {
+      if( Smer == OP_BUY ) { Rezultat = OrderSend( Symbol(), OP_BUY,  velikostPozicij, Ask, 0, Ask - razdalja, 0, "NS001", 0, 0, Green ); }
+      else                 { Rezultat = OrderSend( Symbol(), OP_SELL, velikostPozicij, Bid, 0, Bid + razdalja, 0, "NS001", 0, 0, Red   ); }
+      if( Rezultat == -1 ) 
+        { 
+          Print( "OdpriPozicijo::NAPAKA: neuspešno odpiranje dodatne pozicije. Ponoven poskus èez 30s..." ); 
+          Sleep( 30000 );
+          RefreshRates();
+        }
+    }
+  while( Rezultat == -1 );
+  return( Rezultat );
 } // OdpriPozicijo
+
+
+
+/*------------------------------------------------------------------------------------------------------------------------------------------------------
+FUNKCIJA: PostaviSLnaBE( int Id )
+
+Funkcionalnost:
+---------------
+Funkcija poziciji z id-jem Id postavi stop loss na break even.
+
+Zaloga vrednosti:
+-----------------
+USPEH: ponastavljanje uspešno
+NAPAKA: ponastavljanje ni bilo uspešno
+
+Vhodni parametri:
+-----------------
+Id: oznaka pozicije.
+
+Implementacija: 
+--------------- */
+int PostaviSLnaBE( int Id )
+{
+  int  selectRezultat;
+  bool modifyRezultat;
+
+  selectRezultat = OrderSelect( Id, SELECT_BY_TICKET );
+  if( selectRezultat == false ) 
+    { Print( "NS001::PostaviSLnaBE::OPOZORILO: Pozicije ", Id, " ni bilo mogoèe najti. Preveri pravilnost delovanja algoritma." ); return( false ); }
+
+  modifyRezultat = OrderModify( Id, OrderOpenPrice(), OrderOpenPrice(), 0, 0, clrNONE );
+  if( modifyRezultat == false ) 
+    { Print( "NS001::PostaviSLnaBE::OPOZORILO: Pozicije ", Id, " ni bilo mogoèe ponastaviti SL na BE. Preveri ali je že ponastavljeno." ); return( NAPAKA ); } else { return( USPEH ); }
+} // PostaviSLnaBE
 
 
 
@@ -901,8 +956,8 @@ double VrednostOdprtihPozicij()
 {
   double vrednost = 0;
 
-  for( int i = kazOdprtaNakupna;  i < steviloPozicij; i++ ) { vrednost = vrednost + VrednostPozicije( nakPozicije[ i ] ); }
-  for( int j = kazOdprtaProdajna; j < steviloPozicij; j++ ) { vrednost = vrednost + VrednostPozicije( proPozicije[ j ] ); }
+  for( int i = kazOdprtaNakupna;  i < ( steviloPozicij - 1 ); i++ ) { vrednost = vrednost + VrednostPozicije( nakPozicije[ i ] ); }
+  for( int j = kazOdprtaProdajna; j < ( steviloPozicij - 1 ); j++ ) { vrednost = vrednost + VrednostPozicije( proPozicije[ j ] ); }
   vrednostPozicij = vrednost; // vrednost shranimo tudi v globalno spremenljivko, da zmanjšamo število klicev funkcije
   return( vrednost );
 } // VrednostOdprtihPozicij
@@ -1059,8 +1114,11 @@ int StanjeS1()
   double vrednost = VrednostOdprtihPozicij();
   if( ( vrednost + izkupicekAlgoritma ) > aktualnaTPVrednost ) 
   { 
-    for( int i = kazOdprtaNakupna;  i < steviloPozicij; i++ ) { ZapriPozicijo( nakPozicije[ i ] ); }
-    for( int j = 0;                 j < steviloPozicij; j++ ) { ZapriPozicijo( proPozicije[ j ] ); }  // ker moramo poèistiti nadomestne sell orderje
+    for( int i = kazOdprtaNakupna;  i < ( steviloPozicij - 1 ); i++ ) { ZapriPozicijo( nakPozicije[ i ] ); } // 1 pozicijo pustimo odprto - nova noga stonoge
+    for( int j = 0;                 j < steviloPozicij;         j++ ) { ZapriPozicijo( proPozicije[ j ] ); } // ker moramo poèistiti nadomestne sell orderje
+    
+    PostaviSLnaBE( nakPozicije[ steviloPozicij - 1 ] ); // nogi stonoge postavimo SL na BE
+    
     Print( "Vrednost odprtih pozicij: ", DoubleToStr( vrednost, 2 ) );
     Print( "Izkupièek algoritma: ",      DoubleToStr( izkupicekAlgoritma, 2 ) );
     Print( "We f***** the biatch!!!! ------------------------------------------------------------------------------------------------------------" );
@@ -1118,8 +1176,11 @@ int StanjeS2()
   double vrednost = VrednostOdprtihPozicij();
   if( ( vrednost + izkupicekAlgoritma ) > aktualnaTPVrednost ) 
   { 
-    for( int i = 0;                 i < steviloPozicij; i++ ) { ZapriPozicijo( nakPozicije[ i ] ); } // ker moramo poèistiti nadomestne buy orderje
-    for( int j = kazOdprtaProdajna; j < steviloPozicij; j++ ) { ZapriPozicijo( proPozicije[ j ] ); }
+    for( int i = 0;                 i < steviloPozicij;         i++ ) { ZapriPozicijo( nakPozicije[ i ] ); } // ker moramo poèistiti nadomestne buy orderje
+    for( int j = kazOdprtaProdajna; j < ( steviloPozicij - 1 ); j++ ) { ZapriPozicijo( proPozicije[ j ] ); } // eno pustimo odprto - nova noga stonoge
+    
+    PostaviSLnaBE( proPozicije[ steviloPozicij - 1] ); // nogi stonoge postavimo SL na BE
+    
     Print( "Vrednost odprtih pozicij: ", DoubleToStr( vrednost, 2 ) );
     Print( "Izkupièek algoritma: ",      DoubleToStr( izkupicekAlgoritma, 2 ) );
     Print( "We f***** the biatch!!!! ------------------------------------------------------------------------------------------------------------" );
