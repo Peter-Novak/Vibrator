@@ -1,7 +1,7 @@
 /*
 ***********************************************************************************************************************************************************
 *                                                                                                                                                         *
-* NS001.mq4, verzija: 1.03                                                                                                                              *
+* NS001.mq4, verzija: 1.04                                                                                                                              *
 *                                                                                                                                                         *
 * Copyright july, august 2014, Peter Novak ml.                                                                                                            *
 ***********************************************************************************************************************************************************
@@ -33,6 +33,9 @@ NS001.mq4 (verzija 1.03)
    Prejšnja verzija deluje odlièno. Problem je edino premajhna profitabilnost glede na drawdown, ki ga lahko povzroèi. Zato bi algoritem uporabil kot 
    sejalca novih pozicij - equity milipede oziroma stonogo. Izraèun profitnega cilja prilagodim tako, da vedno zaprem vse pozicije razen ene. Ta ostane 
    odprta za vedno in predstavlja eno nogo stonogice.
+
+NS001.mq4 (verzija 1.04)
+   V verziji 1.03 je bila napaka - narobe smo zapirali pozicije ko je bil dosežen TP, verzija 1.04 to napako odpravlja.
    
 --------------------------------------------------------------------------------------------------------------------------------------------------------*/
 
@@ -223,7 +226,7 @@ Implementacija:
 int init()
 {
   Print( "****************************************************************************************************************" );
-  Print( "* Welcome on behalf of NS001, version 1.03. Let's f*** the biatch!                                             *" );
+  Print( "* Welcome on behalf of NS001, version 1.04. Let's f*** the biatch!                                             *" );
   Print( "****************************************************************************************************************" );
  
   double razdalja; 
@@ -1114,14 +1117,15 @@ int StanjeS1()
   double vrednost = VrednostOdprtihPozicij();
   if( ( vrednost + izkupicekAlgoritma ) > aktualnaTPVrednost ) 
   { 
-    for( int i = kazOdprtaNakupna;  i < ( steviloPozicij - 1 ); i++ ) { ZapriPozicijo( nakPozicije[ i ] ); } // 1 pozicijo pustimo odprto - nova noga stonoge
-    for( int j = 0;                 j < steviloPozicij;         j++ ) { ZapriPozicijo( proPozicije[ j ] ); } // ker moramo poèistiti nadomestne sell orderje
+    for( int i = kazOdprtaNakupna + 1;  i < steviloPozicij; i++ ) { ZapriPozicijo( nakPozicije[ i ] ); } // 1 pozicijo pustimo odprto - nova noga stonoge
+    for( int j = 0;                     j < steviloPozicij; j++ ) { ZapriPozicijo( proPozicije[ j ] ); } // ker moramo poèistiti nadomestne sell orderje
     
-    PostaviSLnaBE( nakPozicije[ steviloPozicij - 1 ] ); // nogi stonoge postavimo SL na BE
+    PostaviSLnaBE( nakPozicije[ kazOdprtaNakupna ] ); // nogi stonoge postavimo SL na BE
     
     Print( "Vrednost odprtih pozicij: ", DoubleToStr( vrednost, 2 ) );
-    Print( "Izkupièek algoritma: ",      DoubleToStr( izkupicekAlgoritma, 2 ) );
-    Print( "We f***** the biatch!!!! ------------------------------------------------------------------------------------------------------------" );
+    Print( "Izguba algoritma: ",      DoubleToStr( izkupicekAlgoritma, 2 ) );
+    Print( "Skupni izkupièek: ", DoubleToStr( vrednost - izkupicekAlgoritma, 2 ) );
+    Print( "YES! We f***** the biatch!!!! ------------------------------------------------------------------------------------------------------------" );
     // èe je nastavljen parameter za zaustavitev gremo v stanje S4, sicer zaènemo vse od zaèetka
     if( zaustavitev == 1 ) { return( S4 ); } else { return( init() ); }
   }
@@ -1176,14 +1180,15 @@ int StanjeS2()
   double vrednost = VrednostOdprtihPozicij();
   if( ( vrednost + izkupicekAlgoritma ) > aktualnaTPVrednost ) 
   { 
-    for( int i = 0;                 i < steviloPozicij;         i++ ) { ZapriPozicijo( nakPozicije[ i ] ); } // ker moramo poèistiti nadomestne buy orderje
-    for( int j = kazOdprtaProdajna; j < ( steviloPozicij - 1 ); j++ ) { ZapriPozicijo( proPozicije[ j ] ); } // eno pustimo odprto - nova noga stonoge
+    for( int i = 0;                     i < steviloPozicij; i++ ) { ZapriPozicijo( nakPozicije[ i ] ); } // ker moramo poèistiti nadomestne buy orderje
+    for( int j = kazOdprtaProdajna + 1; j < steviloPozicij; j++ ) { ZapriPozicijo( proPozicije[ j ] ); } // eno pustimo odprto - nova noga stonoge
     
-    PostaviSLnaBE( proPozicije[ steviloPozicij - 1] ); // nogi stonoge postavimo SL na BE
+    PostaviSLnaBE( proPozicije[ kazOdprtaProdajna ] ); // nogi stonoge postavimo SL na BE
     
     Print( "Vrednost odprtih pozicij: ", DoubleToStr( vrednost, 2 ) );
-    Print( "Izkupièek algoritma: ",      DoubleToStr( izkupicekAlgoritma, 2 ) );
-    Print( "We f***** the biatch!!!! ------------------------------------------------------------------------------------------------------------" );
+    Print( "Izguba algoritma: ",      DoubleToStr( izkupicekAlgoritma, 2 ) );
+    Print( "Skupni izkupièek: ", DoubleToStr( vrednost - izkupicekAlgoritma, 2 ) );
+    Print( "YES! We f***** the biatch!!!! ------------------------------------------------------------------------------------------------------------" );
     // èe je nastavljen parameter za zaustavitev gremo v stanje S4, sicer zaènemo vse od zaèetka
     if( zaustavitev == 1 ) { return( S4 ); } else { return( init() ); }
   }
