@@ -1,42 +1,14 @@
 /*
 ***********************************************************************************************************************************************************
 *                                                                                                                                                         *
-* NS001.mq4, verzija: 1.04                                                                                                                              *
+* Vibrator DX-UL1975KX-01/165.mq4,                                                                                                                           *
 *                                                                                                                                                         *
-* Copyright july, august 2014, Peter Novak ml.                                                                                                            *
+* Copyright october 2014, Peter Novak ml.                                                                                                            *
 ***********************************************************************************************************************************************************
 */
 /* Zgodovina verzij ---------------------------------------------------------------------------------------------------------------------------------------
-NS001-demo.mq4 (verzija 1.00)
-   Prva verzija, ki je delovala pravilno in je bila na testu v tednu 21.07.2014 - 27.07.2014. Napak v delovanju ni bilo odkritih, res pa je, da zaradi 
-   izjemno mirnega tedna ni priölo do nobenega pobiranja profita.
-
-NS001-demo-01.mq4 (verzija 1.01)
-   V tej verziji poskuöamo nasloviti teûavo do katere pride, Ëe se algoritem ustavi in pusti za seboj odprte pozicije. éeleli bi, da po ponovnem zagonu
-   algoritem prepozna svoje od prej odprte pozicije in ustrezno nadaljuje z izvajanjem. Reöitev bo implementirana tako, da bo algoritem ob vsaki spremembi
-   svoje trenutno stanje zapisal v datoteko NS001-[ime].dat, kjer bo [ime] dodaten parameter algoritma. Po zaustavitvi bo stanje restavriral iz zapisa v
-   datoteki.
-   
-   Algoritmu povemo, da naj se inicializira iz datoteke z vhodnim parametrom restart. »e je njegova vrednost 1 (DA), pomeni da bo algoritem poskusil 
-   prebrati inicialno stanje iz datoteke z imenom NS001-[ime].dat. »e branje ne bo uspeöno, se algoritem ustavi. »e je vrednost parametra 0 (NE), pomeni
-   da se bo algoritem pognal od zaËetka.
-   
-   Poleg tega v tej verziji uvajamo tudi mehanizem za zaustavitev algoritma: Ëe je spremenljivka zaustavitev nastavljena na 1, potem se algoritem po
-   doseûenem profitnem cilju ustavi. »e je 0, nadaljuje s trgovanjem.
-
-NS001.mq4 (verzija 1.02)
-   Pri izraËunu vrednosti vseh pozicij naj se upoöteva tudi Swap. Ta je pri nekaterih parih precejöen in je prav da ga upoötevamo.
-   Bistveno sem zmanjöal ötevilo vrstic izpisa na zaslon.
-   Dodal novo vrednost: dnevni inkrement. »e profitni cilj ni doseûen veË kot 1 dan, potem se ga poveËa za dnevni inkrement.
-   
-NS001.mq4 (verzija 1.03)
-   Prejönja verzija deluje odliËno. Problem je edino premajhna profitabilnost glede na drawdown, ki ga lahko povzroËi. Zato bi algoritem uporabil kot 
-   sejalca novih pozicij - equity milipede oziroma stonogo. IzraËun profitnega cilja prilagodim tako, da vedno zaprem vse pozicije razen ene. Ta ostane 
-   odprta za vedno in predstavlja eno nogo stonogice.
-
-NS001.mq4 (verzija 1.04)
-   V verziji 1.03 je bila napaka - narobe smo zapirali pozicije ko je bil doseûen TP, verzija 1.04 to napako odpravlja.
-   
+09.10.2014 Verzija UL1975KX-01/165 
+Prva verzija algoritma - proof of concept
 --------------------------------------------------------------------------------------------------------------------------------------------------------*/
 
 
@@ -46,60 +18,59 @@ NS001.mq4 (verzija 1.04)
 
 
 
-/* NS001
+/* VibratorDX UL1975KX-01/165
 	
 Algoritem deluje takole:
 	
 	Faza I: INICIALIZACIJA
 	-------------------------------------------------------------------------------------------------------------------------------------------------------------- 
-	Odpre najvec maxSteviloPozicij v BUY in SELL smereh. Za vsako pozicijo v BUY ali SELL smeri nastavimo stop loss in take profit takole: 
-		
-		- prva pozicija ima stop loss 1*stopRazdalja,
-		- druga pozicija ima stop loss 2*stopRazdalja, 
-		- tretja pozicija ima stop loss 3*stopRazdalja in tako naprej do steviloPozicij
+	Odpre eno pozicijo BUY in eno pozicijo SELL po tr≈æni ceni. Obe poziciji imata stop loss in take profit nastavljeni enako:
+	
+		- stop loss: steviloRavni*vmesnaRazdalja,
+		- take profit: vmesnaRazdalja 
 
-  ZaËnemo z dvema pozicijama v vsako smer, vsakiË ko cena sproûi stop loss 1. ravni, ötevilo pozicij poveËamo za 1, dokler ne doseûe vrednosti
+  Zaƒçnemo z dvema pozicijama v vsako smer, vsakiƒç ko cena spro≈æi stop loss 1. ravni, ≈°tevilo pozicij poveƒçamo za 1, dokler ne dose≈æe vrednosti
   maxSteviloPozicij.
 
 
 	Faza II: SPREMLJANJE
 	--------------------------------------------------------------------------------------------------------------------------------------------------------------
-	Spremljanje modeliramo z uporabo DKA (deterministiËni konËni avtomat) katerega opis stanj je podan spodaj. 
+	Spremljanje modeliramo z uporabo DKA (deterministiƒçni konƒçni avtomat) katerega opis stanj je podan spodaj. 
 	
 	Stanje 0 (S0)
 	-------------
 	--> Invariante stanja: 
-	  o odprto je enako ötevilo pozicij v obe smeri, 
-		o vse pozicije so öe odprte, 
-		o noben stop loss se öe ni sproûil.
+	  o odprto je enako ≈°tevilo pozicij v obe smeri, 
+		o vse pozicije so ≈°e odprte, 
+		o noben stop loss se ≈°e ni spro≈æil.
 	
-	--> Moûni prehodi:
+	--> Mo≈æni prehodi:
 		S0 --> S1: 
-			o pogoj: ko se sproûi stop loss na eni od SELL pozicij
+			o pogoj: ko se spro≈æi stop loss na eni od SELL pozicij
 			o akcije pred prehodom:
-				- popravimo trenutno vrednost izkupiËka algoritma - dodamo vrednost pravkar zaprte pozicije
+				- popravimo trenutno vrednost izkupiƒçka algoritma - dodamo vrednost pravkar zaprte pozicije
 				- odpremo stop sell order s ceno vstopa enako kot je bila pri zaprti poziciji
-				- odpremo dodaten stop sell order s ceno vstopa enako kot je bila pri zaprti poziciji, Ëe je odprto ötevilo pozicij < maxStevilo pozicij.
+				- odpremo dodaten stop sell order s ceno vstopa enako kot je bila pri zaprti poziciji, ƒçe je odprto ≈°tevilo pozicij < maxStevilo pozicij.
 		S0 --> S2:
-			o pogoj: ko se sproûi stop loss na eni od BUY pozicij
+			o pogoj: ko se spro≈æi stop loss na eni od BUY pozicij
 			o akcije pred prehodom:
-				- popravimo trenutno vrednost izkupiËka algoritma - dodamo vrednost pravkar zaprte pozicije
+				- popravimo trenutno vrednost izkupiƒçka algoritma - dodamo vrednost pravkar zaprte pozicije
 				- odpremo stop buy order s ceno vstopa enako kot je bila pri zaprti poziciji
-				- odpremo dodaten stop buy order s ceno vstopa enako kot je bila pri zaprti poziciji, Ëe je odprto ötevilo pozicij < maxStevilo pozicij.
+				- odpremo dodaten stop buy order s ceno vstopa enako kot je bila pri zaprti poziciji, ƒçe je odprto ≈°tevilo pozicij < maxStevilo pozicij.
 					
   Stanje 1 (S1)
   -------------
 	--> Invariante stanja  
-		o odprtih je veË BUY pozicij kot SELL pozicij,
+		o odprtih je veƒç BUY pozicij kot SELL pozicij,
 		o najmanj ena od SELL pozicij je dosegla stop loss, 
-		o vrednost vseh odprtih pozicij + izkupiËek algoritma < ciljni dobiËek
+		o vrednost vseh odprtih pozicij + izkupiƒçek algoritma < ciljni dobiƒçek
 	
-	--> Moûni prehodi:
+	--> Mo≈æni prehodi:
 		S1 --> S0:
-			o pogoj: ko se odprejo vsi stop sell orderji in je ötevilo odprtih pozicij v obe smeri ponovno enako,
+			o pogoj: ko se odprejo vsi stop sell orderji in je ≈°tevilo odprtih pozicij v obe smeri ponovno enako,
 			o akcije pred prehodom: /
 		ponoven zagon algoritma INICIALIZACIJA:
-			o pogoj: vrednost vseh odprtih pozicij + izkupiËek algoritma > ciljni dobiËek
+			o pogoj: vrednost vseh odprtih pozicij + izkupiƒçek algoritma > ciljni dobiƒçek
 			o akcije pred prehodom:
 				- zapremo vse odprte pozicije
 				- zapremo vse stop orderje
@@ -107,37 +78,37 @@ Algoritem deluje takole:
 	Stanje 2 (S2)
 	-------------
 	--> Invariante stanja: 
-		o odprtih je veË SELL pozicij kot BUY pozicij,
+		o odprtih je veƒç SELL pozicij kot BUY pozicij,
 		o najmanj ena od BUY pozicij je dosegla stop loss, 
-		o vrednost vseh odprtih pozicij + izkupiËek algoritma < ciljni dobiËek
-	--> Moûni prehodi:
+		o vrednost vseh odprtih pozicij + izkupiƒçek algoritma < ciljni dobiƒçek
+	--> Mo≈æni prehodi:
 		S2 --> S0:
-			o pogoj: ko se odprejo vsi stop buy orderji in je ötevilo odprtih pozicij v obe smeri ponovno enako,
+			o pogoj: ko se odprejo vsi stop buy orderji in je ≈°tevilo odprtih pozicij v obe smeri ponovno enako,
 			o akcije pred prehodom: /
 		ponoven zagon algoritma INICIALIZACIJA:
-			o pogoj: vrednost vseh odprtih pozicij + izkupiËek algoritma > ciljni dobiËek
+			o pogoj: vrednost vseh odprtih pozicij + izkupiƒçek algoritma > ciljni dobiƒçek
 			o akcije pred prehodom:
 				- zapremo vse odprte pozicije
 				- zapremo vse stop orderje
 				
 	Stanje 3 (S3)
 	-------------
-	»akamo da nastopi Ëas za trgovanje
+	ƒåakamo da nastopi ƒças za trgovanje
 	
 	Stanje 4 (S4)
 	-------------
-	KonËno stanje.
+	Konƒçno stanje.
 */
 
 
 
 // Vhodni parametri ---------------------------------------------------------------------------------------------------------------------------------------
 extern string imeDatoteke;       // Identifikator datoteke
-extern int    maxSteviloPozicij; // NajveËje ötevilo pozicij
+extern int    maxSteviloPozicij; // Najveƒçje ≈°tevilo pozicij
 extern double stopRazdalja;      // Razdalja med pozicijami
 extern double tpVrednost;        // Inicialni profitni cilj (EUR)
 extern double tpInkrement;       // Dnevni inkrement (EUR)
-extern int    uraKonca;          // Ura zaËetka trgovanja
+extern int    uraKonca;          // Ura zaƒçetka trgovanja
 extern int    uraZacetka;        // Ura konca trgovanja
 extern int    restart;           // Restart 1 - DA, 0 - NE
 extern double velikostPozicij;   // Velikost pozicij (v lotih)
@@ -147,7 +118,7 @@ extern int    zaustavitev;       // 1 - DA, 0 - NE
 
 
 // Globalne konstante -------------------------------------------------------------------------------------------------------------------------------------
-#define MAX_POZ 50 // najveËje moûno ötevilo odprtih pozicij v eno smer
+#define MAX_POZ 50 // najveƒçje mo≈æno ≈°tevilo odprtih pozicij v eno smer
 #define S0      10 // stanje S0
 #define S1      11 // stanje S1
 #define S2      12 // stanje S2
@@ -159,15 +130,15 @@ extern int    zaustavitev;       // 1 - DA, 0 - NE
 
 
 // Globalne spremenljivke ---------------------------------------------------------------------------------------------------------------------------------
-double aktualnaTPVrednost;   // aktualni profitni cilj (tpVrednost poveËana za dnevne inkremente)
-int    dan;                  // ötevilka dneva
-double izkupicekAlgoritma;   // trenutni izkupiËek algoritma
+double aktualnaTPVrednost;   // aktualni profitni cilj (tpVrednost poveƒçana za dnevne inkremente)
+int    dan;                  // ≈°tevilka dneva
+double izkupicekAlgoritma;   // trenutni izkupiƒçek algoritma
 int    kazOdprtaProdajna;    // kazalec na naslednjo odprto prodajno pozicijo
 int    kazOdprtaNakupna;     // kazalec na naslednjo odprto nakupno pozicijo
 int    nakPozicije[MAX_POZ]; // polje id-jev nakupnih pozicij
 int    proPozicije[MAX_POZ]; // polje id-jev prodajnih pozicij
 int    stanje;               // trenutno stanje DKA
-int    steviloPozicij;       // trenutno ötevilo pozicij
+int    steviloPozicij;       // trenutno ≈°tevilo pozicij
 double vrednostPozicij;      // vrednost vseh trenutno odprtih pozicij
 
 
@@ -187,7 +158,7 @@ FUNKCIJA: deinit
 
 Funkcionalnost:
 ---------------
-Sistem jo pokliËe ob zaustavitvi. NS001 je ne uporablja.
+Sistem jo pokliƒçe ob zaustavitvi. NS001 je ne uporablja.
 
 Zaloga vrednosti:
 -----------------
@@ -211,7 +182,7 @@ FUNKCIJA: init
 
 Funkcionalnost:
 ---------------
-Sistem jo pokliËe ob zagonu. V njej nastavimo zaËetno stanje avtomata, zaËetni izkupiËek algoritma in izpiöemo pozdravno sporoËilo.
+Sistem jo pokliƒçe ob zagonu. V njej nastavimo zaƒçetno stanje avtomata, zaƒçetni izkupiƒçek algoritma in izpi≈°emo pozdravno sporoƒçilo.
 
 Zaloga vrednosti:
 -----------------
@@ -240,19 +211,19 @@ int init()
   steviloPozicij     = 2;
   vrednostPozicij    = 0;
 	
-	// Ëe smo algoritem restartali, potem inicializiramo algoritem na podlagi zapisa v datoteki. Po restartu postavimo restart na 0.
+	// ƒçe smo algoritem restartali, potem inicializiramo algoritem na podlagi zapisa v datoteki. Po restartu postavimo restart na 0.
 	if( restart == 1 )
 	{ 
 	   stanje = PreberiStanje( imeDatoteke );
 	   if( stanje == NAPAKA ) 
-	   { Print( "Inicializacija ni bila uspeöna, algoritem prekinjen - prehod v konËno stanje S4." ); stanje = S4; return( S4 ); }
+	   { Print( "Inicializacija ni bila uspe≈°na, algoritem prekinjen - prehod v konƒçno stanje S4." ); stanje = S4; return( S4 ); }
 	   else
 	   { restart = 0; IzbrisiDatoteko( imeDatoteke ); ShraniStanje( imeDatoteke ); return( stanje ); }
 	}
 	
-   // Ëe smo izven trgovalnega Ëasa, potem gremo v stanje S3, sicer v S0 in odpremo zaËetni nabor pozicij
+   // ƒçe smo izven trgovalnega ƒçasa, potem gremo v stanje S3, sicer v S0 in odpremo zaƒçetni nabor pozicij
    // Print( "Ura: ", TimeHour( TimeCurrent() ), " Minuta: ", TimeMinute( TimeCurrent() ) );
-   if( TrgovalnoObdobje() == true ) { stanje = S0; } else { Print( "Trenutno smo izven trgovalnega Ëasa - Ëakamo, da napoËi naö Ëas..." ); stanje = S3; return( S3 ); }
+   if( TrgovalnoObdobje() == true ) { stanje = S0; } else { Print( "Trenutno smo izven trgovalnega ƒçasa - ƒçakamo, da napoƒçi na≈° ƒças..." ); stanje = S3; return( S3 ); }
 	
 	// inicializacija vrednosti polj pozicij
 	for( int j = 0; j < MAX_POZ; j++ )
@@ -261,14 +232,14 @@ int init()
 	   proPozicije[ j ] = 0;
 	}
 	
-	// odpiranje zaËetnega nabora pozicij
+	// odpiranje zaƒçetnega nabora pozicij
 	razdalja = stopRazdalja;
 	for( int i = 0; i < steviloPozicij; i++)
 	{
 		nakPozicije[ i ] = OdpriPozicijo( OP_BUY,  razdalja  ); 
 		proPozicije[ i ] = OdpriPozicijo( OP_SELL, razdalja );
 		razdalja = razdalja + razdalja;
-		// PN: opozorilo Ëe pride pri odpiranju pozicije do napake - nadomestimo z bullet proof error handlingom, Ëe bodo testi pokazali profitabilnost
+		// PN: opozorilo ƒçe pride pri odpiranju pozicije do napake - nadomestimo z bullet proof error handlingom, ƒçe bodo testi pokazali profitabilnost
 		if( ( nakPozicije[ i ] == NAPAKA ) || ( proPozicije[ i ] == NAPAKA ) ) { Print("init: NAPAKA pri odpiranju pozicije ", i ); }
 	}
 	
@@ -284,7 +255,7 @@ FUNKCIJA: start
 
 Funkcionalnost:
 ---------------
-Glavna funkcija, ki upravlja celoten algoritem - sistem jo pokliËe ob vsakem ticku. 
+Glavna funkcija, ki upravlja celoten algoritem - sistem jo pokliƒçe ob vsakem ticku. 
 
 Zaloga vrednosti:
 -----------------
@@ -298,7 +269,7 @@ Implementacija:
 --------------- */
 int start()
 {
-  int trenutnoStanje; // zabeleûimo za ugotavljanje spremebe stanja
+  int trenutnoStanje; // zabele≈æimo za ugotavljanje spremebe stanja
  
   trenutnoStanje = stanje;
   switch( stanje )
@@ -312,22 +283,22 @@ int start()
       Print( "NS001::start::OPOZORILO: Stanje ", stanje, " ni veljavno stanje - preveri pravilnost delovanja algoritma." );
   }
 
-  // zabeleûimo stanje algoritma, Ëe je priölo do prehoda med stanji
+  // zabele≈æimo stanje algoritma, ƒçe je pri≈°lo do prehoda med stanji
   if( trenutnoStanje != stanje ) 
   { 
     IzbrisiDatoteko( imeDatoteke ); ShraniStanje( imeDatoteke ); 
     Print( "Prehod: ", ImeStanja( trenutnoStanje ), " -----> ", ImeStanja( stanje ) ); 
   }
   
-  // Ëe je napoËil nov dan, potem poveËamo profitni cilj za dnevni inkrement in shranimo stanje algoritma
+  // ƒçe je napoƒçil nov dan, potem poveƒçamo profitni cilj za dnevni inkrement in shranimo stanje algoritma
   if( dan != DayOfYear() ) 
   { 
     aktualnaTPVrednost = aktualnaTPVrednost + tpInkrement; dan = DayOfYear(); 
     IzbrisiDatoteko( imeDatoteke ); ShraniStanje( imeDatoteke ); 
-    Print( "Profitni cilj poveËan za dnevni inkrement: ", DoubleToString( tpInkrement, 2 ), " EUR in zdaj znaöa ", DoubleToString( aktualnaTPVrednost, 2 ), " EUR." ); 
+    Print( "Profitni cilj poveƒçan za dnevni inkrement: ", DoubleToString( tpInkrement, 2 ), " EUR in zdaj zna≈°a ", DoubleToString( aktualnaTPVrednost, 2 ), " EUR." ); 
   }
   
-  // izpis kljuËnih parametrov algoritma na zaslonu
+  // izpis kljuƒçnih parametrov algoritma na zaslonu
   Comment( "Izkupicek algoritma: ",       DoubleToString( izkupicekAlgoritma, 2                   ), " EUR\n", 
            "Trenutna vrednost pozicij: ", DoubleToString( vrednostPozicij,    2                   ), " EUR\n" 
            "Skupno stanje: ",             DoubleToString( vrednostPozicij + izkupicekAlgoritma, 2 ), " EUR\n",
@@ -342,7 +313,7 @@ int start()
 /*
 ***********************************************************************************************************************************************************
 *                                                                                                                                                         *
-* POMOéNE FUNKCIJE                                                                                                                                        *
+* POMO≈ΩNE FUNKCIJE                                                                                                                                        *
 *                                                                                                                                                         *
 ***********************************************************************************************************************************************************
 */
@@ -354,7 +325,7 @@ FUNKCIJA: ImeStanja( int KodaStanja )
 
 Funkcionalnost:
 ---------------
-Na podlagi numeriËne kode stanja, vrne opis stanja.  
+Na podlagi numeriƒçne kode stanja, vrne opis stanja.  
 
 Zaloga vrednosti:
 -----------------
@@ -362,7 +333,7 @@ imena stanj
 
 Vhodni parametri:
 -----------------
-KodaStanja: enoliËna oznaka stanja. 
+KodaStanja: enoliƒçna oznaka stanja. 
 
 Implementacija: 
 --------------- */
@@ -370,7 +341,7 @@ string ImeStanja( int KodaStanja )
 {
   switch( KodaStanja )
   {
-    case S0: return( "S0: Ëakamo na vstop" );
+    case S0: return( "S0: ƒçakamo na vstop" );
     case S1: return( "S1: smer BUY"        );
     case S2: return( "S2: smer SELL"       );
     case S3: return( "S3: gledamo na uro"  );
@@ -386,7 +357,7 @@ FUNKCIJA: IzbrisiDatoteko( string ime )
 
 Funkcionalnost:
 ---------------
-Na podlagi imena datoteke izbriöemo datoteko, Ëe obstaja. 
+Na podlagi imena datoteke izbri≈°emo datoteko, ƒçe obstaja. 
 
 Zaloga vrednosti:
 -----------------
@@ -417,8 +388,8 @@ Odpre buy ali sell stop entry order na enaki ceni kot jo ima podana pozicija, z 
 
 Zaloga vrednosti:
 -----------------
-id odprte pozicije: Ëe je bilo odpiranje pozicije uspeöno;
-NAPAKA: Ëe odpiranje pozicije ni bilo uspeöno; 
+id odprte pozicije: ƒçe je bilo odpiranje pozicije uspe≈°no;
+NAPAKA: ƒçe odpiranje pozicije ni bilo uspe≈°no; 
 
 Vhodni parametri:
 -----------------
@@ -428,10 +399,10 @@ Implementacija:
 --------------- */
 int OdpriNadomestnoPozicijo( int id )
 {
-  bool Rezultat1 = false; // zaËasna spremenljivka za rezultat OrderSelect funkcije
-  int  Rezultat2 = -1;;   // zaËasna spremenljivka za rezultat OrderSend funkcije
+  bool Rezultat1 = false; // zaƒçasna spremenljivka za rezultat OrderSelect funkcije
+  int  Rezultat2 = -1;;   // zaƒçasna spremenljivka za rezultat OrderSend funkcije
  
-  // poiöËemo pozicijo, ki jo nadomeöËamo
+  // poi≈°ƒçemo pozicijo, ki jo nadome≈°ƒçamo
   Rezultat1 = OrderSelect( id, SELECT_BY_TICKET );
   if( Rezultat1 == false ) { Print( "OdpriNadomestnoPozicijo::NAPAKA: pozicije z oznako ni: ", id ); return( NAPAKA ); }
   else 
@@ -444,7 +415,7 @@ int OdpriNadomestnoPozicijo( int id )
           { Rezultat2 = OrderSend( Symbol(), OP_SELLSTOP, velikostPozicij, OrderOpenPrice(), 0, OrderStopLoss(), 0,  "NS001", 0, 0, Green );  }
         if( Rezultat2 == -1 ) 
           { 
-            Print( "OdpriNadomestnoPozicijo::NAPAKA: neuspeöno odpiranje nadomestne pozicije. Ponoven poskus Ëez 30s...", id );
+            Print( "OdpriNadomestnoPozicijo::NAPAKA: neuspe≈°no odpiranje nadomestne pozicije. Ponoven poskus ƒçez 30s...", id );
             Sleep( 30000 );
             RefreshRates();
           }
@@ -461,12 +432,12 @@ FUNKCIJA: OdpriDodatniUkaz( int tip, int id )
 
 Funkcionalnost:
 ---------------
-Odpre buy ali sell order podanega tipa na enaki ceni kot jo ima podana pozicija, s stop loss-om, ki je za en nivo veËji
+Odpre buy ali sell order podanega tipa na enaki ceni kot jo ima podana pozicija, s stop loss-om, ki je za en nivo veƒçji
 
 Zaloga vrednosti:
 -----------------
-id odprte pozicije: Ëe je bilo odpiranje pozicije uspeöno;
-NAPAKA: Ëe odpiranje pozicije ni bilo uspeöno; 
+id odprte pozicije: ƒçe je bilo odpiranje pozicije uspe≈°no;
+NAPAKA: ƒçe odpiranje pozicije ni bilo uspe≈°no; 
 
 Vhodni parametri:
 -----------------
@@ -476,11 +447,11 @@ Implementacija:
 --------------- */
 int OdpriDodatniUkaz( int tip, int id )
 {
-  bool   Rezultat1; // zaËasna spremenljivka za rezultat OrderSelect funkcije
-  int    Rezultat2; // zaËasna spremenljivka za rezultat OrderSend funkcije
+  bool   Rezultat1; // zaƒçasna spremenljivka za rezultat OrderSelect funkcije
+  int    Rezultat2; // zaƒçasna spremenljivka za rezultat OrderSend funkcije
   double stop; // stop loss razdalja
  
-  // poiöËemo pozicijo, ki jo nadomeöËamo
+  // poi≈°ƒçemo pozicijo, ki jo nadome≈°ƒçamo
   Rezultat1 = OrderSelect( id, SELECT_BY_TICKET );
   if( Rezultat1 == false ) { Print( "OdpriDodatniUkaz::NAPAKA: pozicije z oznako ni: ", id ); return( NAPAKA ); }
   else 
@@ -491,7 +462,7 @@ int OdpriDodatniUkaz( int tip, int id )
           Rezultat2 = OrderSend( Symbol(), tip,  velikostPozicij, OrderOpenPrice(), 0, stop, 0,  "NS001", 0, 0, Green );
           if( Rezultat2 == -1 ) 
           { 
-            Print( "OdpriDodatniUkaz::NAPAKA: neuspeöno odpiranje dodatne pozicije. Ponoven poskus Ëez 30s..." ); 
+            Print( "OdpriDodatniUkaz::NAPAKA: neuspe≈°no odpiranje dodatne pozicije. Ponoven poskus ƒçez 30s..." ); 
             Sleep( 30000 );
             RefreshRates();
           }
@@ -508,16 +479,16 @@ FUNKCIJA: OdpriPozicijo( int Smer, double razdalja )
 
 Funkcionalnost:
 ---------------
-Odpre pozicijo po trenutni trûni ceni v podani Smeri. »e gre za pozicijo nakup (Smer OP_BUY):
-* nastavi stop loss podano razdaljo toËk pod ceno odprtja;
+Odpre pozicijo po trenutni tr≈æni ceni v podani Smeri. ƒåe gre za pozicijo nakup (Smer OP_BUY):
+* nastavi stop loss podano razdaljo toƒçk pod ceno odprtja;
 
-»e gre za pozicijo prodaja (Smer OP_SELL):
-* nastavi stop loss podano razdaljo toËk nad ceno odprtja.
+ƒåe gre za pozicijo prodaja (Smer OP_SELL):
+* nastavi stop loss podano razdaljo toƒçk nad ceno odprtja.
 
 Zaloga vrednosti:
 -----------------
-id odprte pozicije: Ëe je bilo odpiranje pozicije uspeöno;
-NAPAKA: Ëe odpiranje pozicije ni bilo uspeöno; 
+id odprte pozicije: ƒçe je bilo odpiranje pozicije uspe≈°no;
+NAPAKA: ƒçe odpiranje pozicije ni bilo uspe≈°no; 
 
 Vhodni parametri:
 -----------------
@@ -536,7 +507,7 @@ int OdpriPozicijo( int Smer, double razdalja )
       else                 { Rezultat = OrderSend( Symbol(), OP_SELL, velikostPozicij, Bid, 0, Bid + razdalja, 0, "NS001", 0, 0, Red   ); }
       if( Rezultat == -1 ) 
         { 
-          Print( "OdpriPozicijo::NAPAKA: neuspeöno odpiranje dodatne pozicije. Ponoven poskus Ëez 30s..." ); 
+          Print( "OdpriPozicijo::NAPAKA: neuspe≈°no odpiranje dodatne pozicije. Ponoven poskus ƒçez 30s..." ); 
           Sleep( 30000 );
           RefreshRates();
         }
@@ -556,8 +527,8 @@ Funkcija poziciji z id-jem Id postavi stop loss na break even.
 
 Zaloga vrednosti:
 -----------------
-USPEH: ponastavljanje uspeöno
-NAPAKA: ponastavljanje ni bilo uspeöno
+USPEH: ponastavljanje uspe≈°no
+NAPAKA: ponastavljanje ni bilo uspe≈°no
 
 Vhodni parametri:
 -----------------
@@ -572,11 +543,11 @@ int PostaviSLnaBE( int Id )
 
   selectRezultat = OrderSelect( Id, SELECT_BY_TICKET );
   if( selectRezultat == false ) 
-    { Print( "NS001::PostaviSLnaBE::OPOZORILO: Pozicije ", Id, " ni bilo mogoËe najti. Preveri pravilnost delovanja algoritma." ); return( false ); }
+    { Print( "NS001::PostaviSLnaBE::OPOZORILO: Pozicije ", Id, " ni bilo mogoƒçe najti. Preveri pravilnost delovanja algoritma." ); return( false ); }
 
   modifyRezultat = OrderModify( Id, OrderOpenPrice(), OrderOpenPrice(), 0, 0, clrNONE );
   if( modifyRezultat == false ) 
-    { Print( "NS001::PostaviSLnaBE::OPOZORILO: Pozicije ", Id, " ni bilo mogoËe ponastaviti SL na BE. Preveri ali je ûe ponastavljeno." ); return( NAPAKA ); } else { return( USPEH ); }
+    { Print( "NS001::PostaviSLnaBE::OPOZORILO: Pozicije ", Id, " ni bilo mogoƒçe ponastaviti SL na BE. Preveri ali je ≈æe ponastavljeno." ); return( NAPAKA ); } else { return( USPEH ); }
 } // PostaviSLnaBE
 
 
@@ -605,7 +576,7 @@ bool PozicijaZaprta( int Id )
 
   Rezultat = OrderSelect( Id, SELECT_BY_TICKET );
   if( Rezultat == false ) 
-    { Print( "NS001::PozicijaZaprta::OPOZORILO: Pozicije ", Id, " ni bilo mogoËe najti. Preveri pravilnost delovanja algoritma." ); return( false ); }
+    { Print( "NS001::PozicijaZaprta::OPOZORILO: Pozicije ", Id, " ni bilo mogoƒçe najti. Preveri pravilnost delovanja algoritma." ); return( false ); }
 
   if( OrderCloseTime() == 0 ) { return( false ); } else { return( true ); }
 } // PozicijaZaprta
@@ -619,17 +590,17 @@ Funkcionalnost:
 ---------------
 Funkcija prebere glavne parametre algoritma iz datoteke. Vrstni red branja je naslednji:
 
-int    maxSteviloPozicij;    // NajveËje ötevilo pozicij
+int    maxSteviloPozicij;    // Najveƒçje ≈°tevilo pozicij
 double stopRazdalja;         // Razdalja med pozicijami
 double tpVrednost;           // Profitni cilj (EUR)
 int    uraKonca;             // Ura konca trgovanja
-int    uraZacetka;           // Ura zaËetka trgovanja
+int    uraZacetka;           // Ura zaƒçetka trgovanja
 double velikostPozicij;      // Velikost pozicij (v lotih)
-double izkupicekAlgoritma;   // trenutni izkupiËek algoritma
+double izkupicekAlgoritma;   // trenutni izkupiƒçek algoritma
 int    kazOdprtaProdajna;    // kazalec na naslednjo odprto prodajno pozicijo
 int    kazOdprtaNakupna;     // kazalec na naslednjo odprto nakupno pozicijo
 int    stanje;               // trenutno stanje DKA
-int    steviloPozicij;       // trenutno ötevilo pozicij
+int    steviloPozicij;       // trenutno ≈°tevilo pozicij
 int    nakPozicije[MAX_POZ]; // polje id-jev nakupnih pozicij
 int    proPozicije[MAX_POZ]; // polje id-jev prodajnih pozicij
 
@@ -637,8 +608,8 @@ int    proPozicije[MAX_POZ]; // polje id-jev prodajnih pozicij
 
 Zaloga vrednosti:
 -----------------
-USPEH  - branje datoteke je bilo uspeöno
-NAPAKA - branje datoteke ni bilo uspeöno
+USPEH  - branje datoteke je bilo uspe≈°no
+NAPAKA - branje datoteke ni bilo uspe≈°no
 
 Vhodni parametri:
 -----------------
@@ -663,7 +634,7 @@ int PreberiStanje( string ime )
     Print( "Branje stanja algoritma iz datoteke ", polnoIme, ": " );
     Print( "----------------------------------------" );
     maxSteviloPozicij  = FileReadInteger( rocajDatoteke,    INT_VALUE );
-    Print( "NajveËje ötevilo pozicij [maxSteviloPozicij]: ",       maxSteviloPozicij );
+    Print( "Najveƒçje ≈°tevilo pozicij [maxSteviloPozicij]: ",       maxSteviloPozicij );
     stopRazdalja       = FileReadDouble ( rocajDatoteke, DOUBLE_VALUE );
     Print( "Razdalja med pozicijami [stopRazdalja]: ",                  stopRazdalja );
     tpVrednost         = FileReadDouble ( rocajDatoteke, DOUBLE_VALUE );
@@ -671,11 +642,11 @@ int PreberiStanje( string ime )
     uraKonca           = FileReadInteger( rocajDatoteke, INT_VALUE    );
     Print( "Ura konca trgovanja [uraKonca]: ",                              uraKonca );
     uraZacetka         = FileReadInteger( rocajDatoteke, INT_VALUE    );
-    Print( "Ura zaËetka trgovanja [uraZacetka]: ",                        uraZacetka );
+    Print( "Ura zaƒçetka trgovanja [uraZacetka]: ",                        uraZacetka );
     velikostPozicij    = FileReadDouble ( rocajDatoteke, DOUBLE_VALUE );
     Print( "Velikost pozicij (v lotih) [velikostPozicij]: ",         velikostPozicij );
     izkupicekAlgoritma = FileReadDouble ( rocajDatoteke, DOUBLE_VALUE );
-    Print( "Trenutni izkupiËek algoritma [izkupicekAlgoritma]: ", izkupicekAlgoritma );
+    Print( "Trenutni izkupiƒçek algoritma [izkupicekAlgoritma]: ", izkupicekAlgoritma );
     kazOdprtaProdajna  = FileReadInteger( rocajDatoteke, INT_VALUE    );
     Print( "Kazalec na odprto prodajno [kazOdprtaProdajna]: ",     kazOdprtaProdajna );
     kazOdprtaNakupna   = FileReadInteger( rocajDatoteke, INT_VALUE    );
@@ -683,7 +654,7 @@ int PreberiStanje( string ime )
     stanje             = FileReadInteger( rocajDatoteke, INT_VALUE    );
     Print( "Stanje algoritma [stanje]: ",                                     stanje );
     steviloPozicij     = FileReadInteger( rocajDatoteke, INT_VALUE    );
-    Print( "Trenutno ötevilo pozicij [steviloPozicij]: ",             steviloPozicij );
+    Print( "Trenutno ≈°tevilo pozicij [steviloPozicij]: ",             steviloPozicij );
         
     // polji nakupnih in prodajnih pozicij
     spisekPozicij = "Nakupne pozicije: ";
@@ -727,17 +698,17 @@ Funkcionalnost:
 ---------------
 Funkcija shrani vse glavne parametre algoritma v datoteko. Vrstni red shranjevanja stanja je naslednji:
 
-int    maxSteviloPozicij;    // NajveËje ötevilo pozicij
+int    maxSteviloPozicij;    // Najveƒçje ≈°tevilo pozicij
 double stopRazdalja;         // Razdalja med pozicijami
 double tpVrednost;           // Profitni cilj (EUR)
 int    uraKonca;             // Ura konca trgovanja
-int    uraZacetka;           // Ura zaËetka trgovanja
+int    uraZacetka;           // Ura zaƒçetka trgovanja
 double velikostPozicij;      // Velikost pozicij (v lotih)
-double izkupicekAlgoritma;   // trenutni izkupiËek algoritma
+double izkupicekAlgoritma;   // trenutni izkupiƒçek algoritma
 int    kazOdprtaProdajna;    // kazalec na naslednjo odprto prodajno pozicijo
 int    kazOdprtaNakupna;     // kazalec na naslednjo odprto nakupno pozicijo
 int    stanje;               // trenutno stanje DKA
-int    steviloPozicij;       // trenutno ötevilo pozicij
+int    steviloPozicij;       // trenutno ≈°tevilo pozicij
 int    nakPozicije[MAX_POZ]; // polje id-jev nakupnih pozicij
 int    proPozicije[MAX_POZ]; // polje id-jev prodajnih pozicij
 
@@ -745,8 +716,8 @@ int    proPozicije[MAX_POZ]; // polje id-jev prodajnih pozicij
 
 Zaloga vrednosti:
 -----------------
-USPEH  - odpiranje datoteke je bilo uspeöno
-NAPAKA - odpiranje datoteke ni bilo uspeöno
+USPEH  - odpiranje datoteke je bilo uspe≈°no
+NAPAKA - odpiranje datoteke ni bilo uspe≈°no
 
 Vhodni parametri:
 -----------------
@@ -770,7 +741,7 @@ int ShraniStanje( string ime )
   if( rocajDatoteke != INVALID_HANDLE)
   {
     Print( "Zapisovanje stanja algoritma v datoteko ", polnoIme, ": -------------------------------------------------------------------------" );
-    vrsticaStanja1 = "NajveËje ötevilo pozicij [maxSteviloPozicij]: " + IntegerToString( maxSteviloPozicij ) + " \\ ";
+    vrsticaStanja1 = "Najveƒçje ≈°tevilo pozicij [maxSteviloPozicij]: " + IntegerToString( maxSteviloPozicij ) + " \\ ";
     FileWriteInteger( rocajDatoteke,                               maxSteviloPozicij );
     vrsticaStanja1 = vrsticaStanja1 + "Razdalja med pozicijami [stopRazdalja]: " + DoubleToString( stopRazdalja, 5 ) + " \\ ";
     FileWriteDouble ( rocajDatoteke,                                    stopRazdalja );
@@ -778,11 +749,11 @@ int ShraniStanje( string ime )
     FileWriteDouble ( rocajDatoteke,                                      tpVrednost );
     vrsticaStanja1 = vrsticaStanja1 + "Ura konca trgovanja [uraKonca]: " + IntegerToString( uraKonca ) + " \\ ";
     FileWriteInteger( rocajDatoteke,                                        uraKonca );
-    vrsticaStanja1 = vrsticaStanja1 + "Ura zaËetka trgovanja [uraZacetka]: " + IntegerToString( uraZacetka ) + " \\ ";
+    vrsticaStanja1 = vrsticaStanja1 + "Ura zaƒçetka trgovanja [uraZacetka]: " + IntegerToString( uraZacetka ) + " \\ ";
     FileWriteInteger( rocajDatoteke,                                      uraZacetka );
     vrsticaStanja2 = "Velikost pozicij (v lotih) [velikostPozicij]: " + DoubleToString( velikostPozicij, 2 ) + " \\ ";
     FileWriteDouble ( rocajDatoteke,                                 velikostPozicij );
-    Print( "Trenutni izkupiËek algoritma [izkupicekAlgoritma]: ", DoubleToString( izkupicekAlgoritma, 2 ), " EUR" );
+    Print( "Trenutni izkupiƒçek algoritma [izkupicekAlgoritma]: ", DoubleToString( izkupicekAlgoritma, 2 ), " EUR" );
     FileWriteDouble ( rocajDatoteke,                              izkupicekAlgoritma );
     vrsticaStanja2 = vrsticaStanja2 + "Kazalec na odprto prodajno [kazOdprtaProdajna]: " + IntegerToString( kazOdprtaProdajna ) + " \\ ";
     FileWriteInteger( rocajDatoteke,                               kazOdprtaProdajna );
@@ -790,7 +761,7 @@ int ShraniStanje( string ime )
     FileWriteInteger( rocajDatoteke,                                kazOdprtaNakupna );
     vrsticaStanja3 = "Stanje algoritma [stanje]: " + ImeStanja( stanje ) + " \\ ";
     FileWriteInteger( rocajDatoteke,                                          stanje );
-    vrsticaStanja3 = vrsticaStanja3 + "Trenutno ötevilo pozicij [steviloPozicij]: " + IntegerToString( steviloPozicij ) + " \\ ";
+    vrsticaStanja3 = vrsticaStanja3 + "Trenutno ≈°tevilo pozicij [steviloPozicij]: " + IntegerToString( steviloPozicij ) + " \\ ";
     FileWriteInteger( rocajDatoteke,                                  steviloPozicij );
     Print( vrsticaStanja1 );
     Print( vrsticaStanja2 );
@@ -845,7 +816,7 @@ FUNKCIJA: TrgovalnoObdobje()
 
 Funkcionalnost:
 ---------------
-Ugotovi ali je trenutni Ëas znotraj trgovalnega intervala, doloËenega z vhodnimi parametri algoritma.
+Ugotovi ali je trenutni ƒças znotraj trgovalnega intervala, doloƒçenega z vhodnimi parametri algoritma.
 
 Zaloga vrednosti:
 -----------------
@@ -899,7 +870,7 @@ bool UkazOdprt( int Id )
 
   Rezultat = OrderSelect( Id, SELECT_BY_TICKET );
   if( Rezultat == false ) 
-    { Print( "NS001::UkazOdprt::OPOZORILO: Pozicije ", Id, " ni bilo mogoËe najti. Preveri pravilnost delovanja algoritma." ); return( false ); }
+    { Print( "NS001::UkazOdprt::OPOZORILO: Pozicije ", Id, " ni bilo mogoƒçe najti. Preveri pravilnost delovanja algoritma." ); return( false ); }
 
   tip = OrderType();
   if( ( ( tip == OP_BUY) || ( tip == OP_SELL ) ) &&
@@ -931,7 +902,7 @@ double VrednostPozicije( int Id )
 
   Rezultat = OrderSelect( Id, SELECT_BY_TICKET );
   if( Rezultat == false ) 
-    { Print( "NS001::ZapriPozicijo::OPOZORILO: Pozicije ", Id, " ni bilo mogoËe najti. Preveri pravilnost delovanja algoritma." ); return( 0 ); }
+    { Print( "NS001::ZapriPozicijo::OPOZORILO: Pozicije ", Id, " ni bilo mogoƒçe najti. Preveri pravilnost delovanja algoritma." ); return( 0 ); }
   return( OrderProfit() + OrderSwap() );
 } // VrednostPozicije
 
@@ -961,7 +932,7 @@ double VrednostOdprtihPozicij()
 
   for( int i = kazOdprtaNakupna;  i < ( steviloPozicij - 1 ); i++ ) { vrednost = vrednost + VrednostPozicije( nakPozicije[ i ] ); }
   for( int j = kazOdprtaProdajna; j < ( steviloPozicij - 1 ); j++ ) { vrednost = vrednost + VrednostPozicije( proPozicije[ j ] ); }
-  vrednostPozicij = vrednost; // vrednost shranimo tudi v globalno spremenljivko, da zmanjöamo ötevilo klicev funkcije
+  vrednostPozicij = vrednost; // vrednost shranimo tudi v globalno spremenljivko, da zmanj≈°amo ≈°tevilo klicev funkcije
   return( vrednost );
 } // VrednostOdprtihPozicij
 
@@ -972,17 +943,17 @@ FUNKCIJA: ZapriPozicijo( int Id )
 
 Funkcionalnost:
 ---------------
-Zapre pozicijo z oznako Id po trenutni trûni ceni.
+Zapre pozicijo z oznako Id po trenutni tr≈æni ceni.
 
 Zaloga vrednosti:
 -----------------
-true: Ëe je bilo zapiranje pozicije uspeöno;
-false: Ëe zapiranje pozicije ni bilo uspeöno; 
+true: ƒçe je bilo zapiranje pozicije uspe≈°no;
+false: ƒçe zapiranje pozicije ni bilo uspe≈°no; 
 
 Vhodni parametri:
 -----------------
 Id: oznaka pozicije.
-Smer: vse moûne variante, briöe tudi ukaze
+Smer: vse mo≈æne variante, bri≈°e tudi ukaze
 
 Implementacija: 
 --------------- */
@@ -992,7 +963,7 @@ bool ZapriPozicijo( int Id )
 
   Rezultat = OrderSelect( Id, SELECT_BY_TICKET );
   if( Rezultat == false ) 
-    { Print( "NS001::ZapriPozicijo::OPOZORILO: Pozicije ", Id, " ni bilo mogoËe najti. Preveri pravilnost delovanja algoritma." ); return( false ); }
+    { Print( "NS001::ZapriPozicijo::OPOZORILO: Pozicije ", Id, " ni bilo mogoƒçe najti. Preveri pravilnost delovanja algoritma." ); return( false ); }
 
   switch( OrderType() )
   {
@@ -1020,69 +991,69 @@ bool ZapriPozicijo( int Id )
 	Stanje 0 (S0)
 	-------------
 	--> Invariante stanja: 
-	  o odprto je enako ötevilo pozicij v obe smeri, 
-		o vse pozicije so öe odprte, 
-		o noben stop loss se öe ni sproûil.
+	  o odprto je enako ≈°tevilo pozicij v obe smeri, 
+		o vse pozicije so ≈°e odprte, 
+		o noben stop loss se ≈°e ni spro≈æil.
 	
-	--> Moûni prehodi:
+	--> Mo≈æni prehodi:
 		S0 --> S1: 
-			o pogoj: ko se sproûi stop loss na eni od SELL pozicij
+			o pogoj: ko se spro≈æi stop loss na eni od SELL pozicij
 			o akcije pred prehodom:
-				- popravimo trenutno vrednost izkupiËka algoritma - dodamo vrednost pravkar zaprte pozicije
+				- popravimo trenutno vrednost izkupiƒçka algoritma - dodamo vrednost pravkar zaprte pozicije
 				- odpremo stop sell order s ceno vstopa enako kot je bila pri zaprti poziciji
-				- odpremo dodaten stop sell order s ceno vstopa enako kot je bila pri zaprti poziciji, Ëe je odprto ötevilo pozicij < maxStevilo pozicij.
+				- odpremo dodaten stop sell order s ceno vstopa enako kot je bila pri zaprti poziciji, ƒçe je odprto ≈°tevilo pozicij < maxStevilo pozicij.
 		S0 --> S2:
-			o pogoj: ko se sproûi stop loss na eni od BUY pozicij
+			o pogoj: ko se spro≈æi stop loss na eni od BUY pozicij
 			o akcije pred prehodom:
-				- popravimo trenutno vrednost izkupiËka algoritma - dodamo vrednost pravkar zaprte pozicije
+				- popravimo trenutno vrednost izkupiƒçka algoritma - dodamo vrednost pravkar zaprte pozicije
 				- odpremo stop buy order s ceno vstopa enako kot je bila pri zaprti poziciji
-				- odpremo dodaten stop buy order s ceno vstopa enako kot je bila pri zaprti poziciji, Ëe je odprto ötevilo pozicij < maxStevilo pozicij.
+				- odpremo dodaten stop buy order s ceno vstopa enako kot je bila pri zaprti poziciji, ƒçe je odprto ≈°tevilo pozicij < maxStevilo pozicij.
 */
 int StanjeS0()
 {
   // S0 --> S1
-  // pozicije so v polju proPozicije urejene po vrsti, Ëe se je sproûil SL, se je sproûil na prvi odprti prodajni poziciji
+  // pozicije so v polju proPozicije urejene po vrsti, ƒçe se je spro≈æil SL, se je spro≈æil na prvi odprti prodajni poziciji
   if( PozicijaZaprta( proPozicije[ kazOdprtaProdajna ] ) == true ) 
     { 
-      // popravimo znesek izkupiËka algoritma in odpremo nadomestni sell stop order
+      // popravimo znesek izkupiƒçka algoritma in odpremo nadomestni sell stop order
       Print("Prodajna pozicija ", kazOdprtaProdajna, " z id-jem ", proPozicije[ kazOdprtaProdajna ], " zaprta - izpolnjen pogoj za prehod v smer nakupa (S1)." );
       izkupicekAlgoritma = izkupicekAlgoritma + VrednostPozicije( proPozicije[ kazOdprtaProdajna ] ); 
-      Print("Trenutni izkupiËek algoritma: ", DoubleToStr( izkupicekAlgoritma, 2 ), " EUR" );
+      Print("Trenutni izkupiƒçek algoritma: ", DoubleToStr( izkupicekAlgoritma, 2 ), " EUR" );
       proPozicije[ kazOdprtaProdajna ] = OdpriNadomestnoPozicijo( proPozicije[ kazOdprtaProdajna ] ); 
-      if( proPozicije[ kazOdprtaProdajna ] == NAPAKA ) { Print("NAPAKA:S0: Odpiranje nadomestne prodajne pozicije neuspeöno." ); }
+      if( proPozicije[ kazOdprtaProdajna ] == NAPAKA ) { Print("NAPAKA:S0: Odpiranje nadomestne prodajne pozicije neuspe≈°no." ); }
       kazOdprtaProdajna++; 
       
-      // Ëe ötevilo pozicij öe ni doseglo maksimuma, potem ga poveËamo za ena in dodamo po en dodatni stop order v vsako smer
+      // ƒçe ≈°tevilo pozicij ≈°e ni doseglo maksimuma, potem ga poveƒçamo za ena in dodamo po en dodatni stop order v vsako smer
       if( steviloPozicij < maxSteviloPozicij )
         { 
-          // indeks steviloPozicij - 1 vedno kaûe na pozicijo z najveËjim stop loss-om
+          // indeks steviloPozicij - 1 vedno ka≈æe na pozicijo z najveƒçjim stop loss-om
           proPozicije[ steviloPozicij ] = OdpriDodatniUkaz( OP_SELLSTOP, proPozicije[ steviloPozicij - 1 ] );
           nakPozicije[ steviloPozicij ] = OdpriDodatniUkaz( OP_BUYLIMIT, nakPozicije[ steviloPozicij - 1 ] );
           if( ( nakPozicije[ steviloPozicij ] == NAPAKA ) ||
-              ( proPozicije[ steviloPozicij ] == NAPAKA ) ) { Print( "NAPAKA:S0: Odpiranje dodatnih pozicij neuspeöno." ); }
+              ( proPozicije[ steviloPozicij ] == NAPAKA ) ) { Print( "NAPAKA:S0: Odpiranje dodatnih pozicij neuspe≈°no." ); }
           steviloPozicij++;
         }
       return( S1 ); 
     } 
   
   // S0 --> S2 
-  // pozicije so v polju nakPozicije urejene po vrsti, Ëe se je sproûil SL, se je sproûil na prvi odprti nakupni poziciji
+  // pozicije so v polju nakPozicije urejene po vrsti, ƒçe se je spro≈æil SL, se je spro≈æil na prvi odprti nakupni poziciji
   if( PozicijaZaprta( nakPozicije[ kazOdprtaNakupna ] ) == true ) 
     { 
-      // popravimo znesek izkupiËka algoritma in odpremo nadomestni sell stop order
+      // popravimo znesek izkupiƒçka algoritma in odpremo nadomestni sell stop order
       Print("Nakupna pozicija ", kazOdprtaNakupna, " z id-jem ", nakPozicije[ kazOdprtaNakupna ], " zaprta - izpolnjen pogoj za prehod v smer prodaje (S2)." );
       izkupicekAlgoritma = izkupicekAlgoritma + VrednostPozicije( nakPozicije[ kazOdprtaNakupna ] ); 
-      Print("Trenutni izkupiËek algoritma: ", DoubleToStr( izkupicekAlgoritma, 2 ), " EUR" );
+      Print("Trenutni izkupiƒçek algoritma: ", DoubleToStr( izkupicekAlgoritma, 2 ), " EUR" );
       nakPozicije[ kazOdprtaNakupna ] = OdpriNadomestnoPozicijo( nakPozicije[ kazOdprtaNakupna ] ); 
       kazOdprtaNakupna++; 
       
-      // Ëe ötevilo pozicij öe ni doseglo maksimuma, potem ga poveËamo za ena in dodamo po en nadomestni stop order v vsako smer
+      // ƒçe ≈°tevilo pozicij ≈°e ni doseglo maksimuma, potem ga poveƒçamo za ena in dodamo po en nadomestni stop order v vsako smer
       if( steviloPozicij < maxSteviloPozicij )
         { 
           proPozicije[ steviloPozicij ] = OdpriDodatniUkaz( OP_SELLLIMIT, proPozicije[ steviloPozicij - 1 ] );
           nakPozicije[ steviloPozicij ] = OdpriDodatniUkaz( OP_BUYSTOP,   nakPozicije[ steviloPozicij - 1 ] );
           if( ( nakPozicije[ steviloPozicij ] == NAPAKA ) ||
-              ( proPozicije[ steviloPozicij ] == NAPAKA ) ) { Print( "NAPAKA: Odpiranje dodatnih pozicij neuspeöno." ); }
+              ( proPozicije[ steviloPozicij ] == NAPAKA ) ) { Print( "NAPAKA: Odpiranje dodatnih pozicij neuspe≈°no." ); }
           steviloPozicij++;
         }
       return( S2 ); 
@@ -1099,15 +1070,15 @@ Stanje S1
 ---------
 Stanje 1 (S1)
 	- Invariante stanja: 
-		- odprtih je veË BUY pozicij kot SELL pozicij,
+		- odprtih je veƒç BUY pozicij kot SELL pozicij,
 		- najmanj ena od SELL pozicij je dosegla stop loss, 
-		- vrednost vseh odprtih pozicij + izkupiËek algoritma < ciljni dobiËek
-	- Moûni prehodi:
+		- vrednost vseh odprtih pozicij + izkupiƒçek algoritma < ciljni dobiƒçek
+	- Mo≈æni prehodi:
 		- prehod v stanje S0:
-			- pogoj: ko se odprejo vsi stop sell orderji in je ötevilo odprtih pozicij v obe smeri ponovno enako,
+			- pogoj: ko se odprejo vsi stop sell orderji in je ≈°tevilo odprtih pozicij v obe smeri ponovno enako,
 			- akcije pred prehodom: /
 		- prehod v Fazo INICIALIZACIJA:
-			- pogoj: vrednost vseh odprtih pozicij + izkupiËek algoritma > ciljni dobiËek
+			- pogoj: vrednost vseh odprtih pozicij + izkupiƒçek algoritma > ciljni dobiƒçek
 			- akcije pred prehodom:
 				- zapremo vse odprte pozicije
 */
@@ -1118,15 +1089,15 @@ int StanjeS1()
   if( ( vrednost + izkupicekAlgoritma ) > aktualnaTPVrednost ) 
   { 
     for( int i = kazOdprtaNakupna + 1;  i < steviloPozicij; i++ ) { ZapriPozicijo( nakPozicije[ i ] ); } // 1 pozicijo pustimo odprto - nova noga stonoge
-    for( int j = 0;                     j < steviloPozicij; j++ ) { ZapriPozicijo( proPozicije[ j ] ); } // ker moramo poËistiti nadomestne sell orderje
+    for( int j = 0;                     j < steviloPozicij; j++ ) { ZapriPozicijo( proPozicije[ j ] ); } // ker moramo poƒçistiti nadomestne sell orderje
     
     PostaviSLnaBE( nakPozicije[ kazOdprtaNakupna ] ); // nogi stonoge postavimo SL na BE
     
     Print( "Vrednost odprtih pozicij: ", DoubleToStr( vrednost, 2 ) );
     Print( "Izguba algoritma: ",      DoubleToStr( izkupicekAlgoritma, 2 ) );
-    Print( "Skupni izkupiËek: ", DoubleToStr( vrednost - izkupicekAlgoritma, 2 ) );
+    Print( "Skupni izkupiƒçek: ", DoubleToStr( vrednost - izkupicekAlgoritma, 2 ) );
     Print( "YES! We f***** the biatch!!!! ------------------------------------------------------------------------------------------------------------" );
-    // Ëe je nastavljen parameter za zaustavitev gremo v stanje S4, sicer zaËnemo vse od zaËetka
+    // ƒçe je nastavljen parameter za zaustavitev gremo v stanje S4, sicer zaƒçnemo vse od zaƒçetka
     if( zaustavitev == 1 ) { return( S4 ); } else { return( init() ); }
   }
   
@@ -1138,13 +1109,13 @@ int StanjeS1()
     return( S0 );
   } 
   
-  // Ëe se je zaprla öe kaköna od prodajnih pozicij, popravimo vrednost kazalca na naslednjo odprto pozicijo, dodamo nadomesten ukaz in popravimo izkupiËek
+  // ƒçe se je zaprla ≈°e kak≈°na od prodajnih pozicij, popravimo vrednost kazalca na naslednjo odprto pozicijo, dodamo nadomesten ukaz in popravimo izkupiƒçek
   if( ( kazOdprtaProdajna < steviloPozicij ) && 
       (  PozicijaZaprta( proPozicije[ kazOdprtaProdajna ] ) == true ) )
   {
     Print( "Zaprta prodajna pozicija ", kazOdprtaProdajna, " z id-jem ", proPozicije[ kazOdprtaProdajna ] );
     izkupicekAlgoritma = izkupicekAlgoritma + VrednostPozicije( proPozicije[ kazOdprtaProdajna ] );
-    Print( "IzkupiËek algoritma: ",      DoubleToStr( izkupicekAlgoritma, 2 ) );
+    Print( "Izkupiƒçek algoritma: ",      DoubleToStr( izkupicekAlgoritma, 2 ) );
     proPozicije[ kazOdprtaProdajna ] = OdpriNadomestnoPozicijo( proPozicije[ kazOdprtaProdajna ] );
     kazOdprtaProdajna++;
     IzbrisiDatoteko( imeDatoteke );
@@ -1161,15 +1132,15 @@ Stanje S2
 	Stanje 2 (S2)
 	-------------
 	--> Invariante stanja: 
-		o odprtih je veË SELL pozicij kot BUY pozicij,
+		o odprtih je veƒç SELL pozicij kot BUY pozicij,
 		o najmanj ena od BUY pozicij je dosegla stop loss, 
-		o vrednost vseh odprtih pozicij + izkupiËek algoritma < ciljni dobiËek
-	--> Moûni prehodi:
+		o vrednost vseh odprtih pozicij + izkupiƒçek algoritma < ciljni dobiƒçek
+	--> Mo≈æni prehodi:
 		S2 --> S0:
-			o pogoj: ko se odprejo vsi stop buy orderji in je ötevilo odprtih pozicij v obe smeri ponovno enako,
+			o pogoj: ko se odprejo vsi stop buy orderji in je ≈°tevilo odprtih pozicij v obe smeri ponovno enako,
 			o akcije pred prehodom: /
 		ponoven zagon algoritma INICIALIZACIJA:
-			o pogoj: vrednost vseh odprtih pozicij + izkupiËek algoritma > ciljni dobiËek
+			o pogoj: vrednost vseh odprtih pozicij + izkupiƒçek algoritma > ciljni dobiƒçek
 			o akcije pred prehodom:
 				- zapremo vse odprte pozicije
 				- zapremo vse stop orderje
@@ -1180,16 +1151,16 @@ int StanjeS2()
   double vrednost = VrednostOdprtihPozicij();
   if( ( vrednost + izkupicekAlgoritma ) > aktualnaTPVrednost ) 
   { 
-    for( int i = 0;                     i < steviloPozicij; i++ ) { ZapriPozicijo( nakPozicije[ i ] ); } // ker moramo poËistiti nadomestne buy orderje
+    for( int i = 0;                     i < steviloPozicij; i++ ) { ZapriPozicijo( nakPozicije[ i ] ); } // ker moramo poƒçistiti nadomestne buy orderje
     for( int j = kazOdprtaProdajna + 1; j < steviloPozicij; j++ ) { ZapriPozicijo( proPozicije[ j ] ); } // eno pustimo odprto - nova noga stonoge
     
     PostaviSLnaBE( proPozicije[ kazOdprtaProdajna ] ); // nogi stonoge postavimo SL na BE
     
     Print( "Vrednost odprtih pozicij: ", DoubleToStr( vrednost, 2 ) );
     Print( "Izguba algoritma: ",      DoubleToStr( izkupicekAlgoritma, 2 ) );
-    Print( "Skupni izkupiËek: ", DoubleToStr( vrednost - izkupicekAlgoritma, 2 ) );
+    Print( "Skupni izkupiƒçek: ", DoubleToStr( vrednost - izkupicekAlgoritma, 2 ) );
     Print( "YES! We f***** the biatch!!!! ------------------------------------------------------------------------------------------------------------" );
-    // Ëe je nastavljen parameter za zaustavitev gremo v stanje S4, sicer zaËnemo vse od zaËetka
+    // ƒçe je nastavljen parameter za zaustavitev gremo v stanje S4, sicer zaƒçnemo vse od zaƒçetka
     if( zaustavitev == 1 ) { return( S4 ); } else { return( init() ); }
   }
   
@@ -1201,13 +1172,13 @@ int StanjeS2()
     return( S0 );
   } 
   
-  // Ëe se je zaprla öe kaköna od nakupnih pozicij, popravimo vrednost kazalca na naslednjo odprto pozicijo, dodamo nadomesten ukaz in popravimo izkupiËek
+  // ƒçe se je zaprla ≈°e kak≈°na od nakupnih pozicij, popravimo vrednost kazalca na naslednjo odprto pozicijo, dodamo nadomesten ukaz in popravimo izkupiƒçek
   if ( ( kazOdprtaNakupna < steviloPozicij ) &&
        ( PozicijaZaprta( nakPozicije[ kazOdprtaNakupna ] ) == true ) )
   {
     Print( "Zaprta nakupna pozicija ", kazOdprtaNakupna, " z id-jem ", nakPozicije[ kazOdprtaNakupna ] );
     izkupicekAlgoritma = izkupicekAlgoritma + VrednostPozicije( nakPozicije[ kazOdprtaNakupna ] );
-    Print( "IzkupiËek algoritma: ",      DoubleToStr( izkupicekAlgoritma, 2 ) );
+    Print( "Izkupiƒçek algoritma: ",      DoubleToStr( izkupicekAlgoritma, 2 ) );
     nakPozicije[ kazOdprtaNakupna ] = OdpriNadomestnoPozicijo( nakPozicije[ kazOdprtaNakupna ] );
     kazOdprtaNakupna++;
     IzbrisiDatoteko( imeDatoteke );
@@ -1223,12 +1194,12 @@ Stanje S3
 ---------
 	Stanje 3 (S3)
 	-------------
-	»akamo da nastopi Ëas za trgovanje
+	ƒåakamo da nastopi ƒças za trgovanje
 */
 int StanjeS3()
 {
-// Ëe smo izven trgovalnega Ëasa, potem gremo v stanje S3, sicer v S0 in odpremo zaËetni nabor pozicij
-   if( TrgovalnoObdobje() == true ) { Print( "»as je, lotimo se dela..." ); init(); return( S0 ); } else { return( S3 ); }
+// ƒçe smo izven trgovalnega ƒçasa, potem gremo v stanje S3, sicer v S0 in odpremo zaƒçetni nabor pozicij
+   if( TrgovalnoObdobje() == true ) { Print( "ƒåas je, lotimo se dela..." ); init(); return( S0 ); } else { return( S3 ); }
 } // StanjeS3
 
 
@@ -1238,7 +1209,7 @@ Stanje S4
 ---------
 	Stanje 4 (S4)
 	-------------
-	KonËno stanje - iz tega stanja ni nobenih prehodov veË.
+	Konƒçno stanje - iz tega stanja ni nobenih prehodov veƒç.
 */
 int StanjeS4()
 {
