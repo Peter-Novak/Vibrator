@@ -174,6 +174,8 @@ int init()
 	// odpiranje začetnega nabora pozicij
 	nakPozicije[ kazTrenutnaNakupna  ] = OdpriPozicijo( OP_BUY,  slRazdalja, tpRazdalja  ); 
 	proPozicije[ kazTrenutnaProdajna ] = OdpriPozicijo( OP_SELL, slRazdalja, tpRazdalja  );
+	
+	nakPozicije[ kazTrenutnaNakupna + 1 ] = OdpriDodatniUkaz( OP_BUY_STOP, 
         // PN: opozorilo če pride pri odpiranju pozicije do napake - nadomestimo z bullet proof error handlingom, če bodo testi pokazali profitabilnost
 	if( ( nakPozicije[ kazTrenutnaNakupna ] == NAPAKA ) || ( proPozicije[ kazTrenutnaProdajna ] == NAPAKA ) ) { Print("init: NAPAKA pri odpiranju pozicije ", i ); }
 
@@ -264,11 +266,8 @@ string ImeStanja( int KodaStanja )
 {
   switch( KodaStanja )
   {
-    case S0: return( "S0: čakamo na vstop" );
-    case S1: return( "S1: smer BUY"        );
-    case S2: return( "S2: smer SELL"       );
-    case S3: return( "S3: gledamo na uro"  );
-    case S4: return( "S4: zaustavitev"     );
+    case S0: return( "S0" );
+    case S4: return( "S4" );
     default: return( "NS001::ImeStanja::OPOZORILO: KodaStanja ni prepoznana. Preveri pravilnost delovanja algoritma." );
   }
 } // ImeStanja
@@ -333,9 +332,9 @@ int OdpriNadomestnoPozicijo( int id )
       do 
       {
         if( OrderType() == OP_BUY )  
-          { Rezultat2 = OrderSend( Symbol(), OP_BUYSTOP,  velikostPozicij, OrderOpenPrice(), 0, OrderStopLoss(), 0,  "NS001", 0, 0, Green );  }
+          { Rezultat2 = OrderSend( Symbol(), OP_BUYSTOP,  velikostPozicij, OrderOpenPrice(), 0, OrderStopLoss(), OrderTakeProfit(),  "NS001", 0, 0, Green );  }
         if( OrderType() == OP_SELL ) 
-          { Rezultat2 = OrderSend( Symbol(), OP_SELLSTOP, velikostPozicij, OrderOpenPrice(), 0, OrderStopLoss(), 0,  "NS001", 0, 0, Green );  }
+          { Rezultat2 = OrderSend( Symbol(), OP_SELLSTOP, velikostPozicij, OrderOpenPrice(), 0, OrderStopLoss(), OrderTakeProfit(),  "NS001", 0, 0, Green );  }
         if( Rezultat2 == -1 ) 
           { 
             Print( "OdpriNadomestnoPozicijo::NAPAKA: neuspešno odpiranje nadomestne pozicije. Ponoven poskus čez 30s...", id );
@@ -351,11 +350,11 @@ int OdpriNadomestnoPozicijo( int id )
 
 
 /*------------------------------------------------------------------------------------------------------------------------------------------------------
-FUNKCIJA: OdpriDodatniUkaz( int tip, int id )
+FUNKCIJA: OdpriDodatniUkaz( int tip, double cena, double sl, double tp )
 
 Funkcionalnost:
 ---------------
-Odpre buy ali sell order podanega tipa na enaki ceni kot jo ima podana pozicija, s stop loss-om, ki je za en nivo večji
+Odpre buy ali sell order podanega tipa s podanima stop loss-om in take profitom
 
 Zaloga vrednosti:
 -----------------
@@ -368,31 +367,25 @@ id
 
 Implementacija: 
 --------------- */
-int OdpriDodatniUkaz( int tip, int id )
+int OdpriDodatniUkaz( int tip, double cena, double sl, double tp )
 {
-  bool   Rezultat1; // začasna spremenljivka za rezultat OrderSelect funkcije
   int    Rezultat2; // začasna spremenljivka za rezultat OrderSend funkcije
-  double stop; // stop loss razdalja
- 
-  // poiščemo pozicijo, ki jo nadomeščamo
-  Rezultat1 = OrderSelect( id, SELECT_BY_TICKET );
-  if( Rezultat1 == false ) { Print( "OdpriDodatniUkaz::NAPAKA: pozicije z oznako ni: ", id ); return( NAPAKA ); }
-  else 
-    { 
-      if( ( tip == OP_BUYLIMIT) || ( tip == OP_BUYSTOP ) ) { stop = OrderStopLoss() - stopRazdalja; } else { stop = OrderStopLoss() + stopRazdalja; }
-      do
-        {
-          Rezultat2 = OrderSend( Symbol(), tip,  velikostPozicij, OrderOpenPrice(), 0, stop, 0,  "NS001", 0, 0, Green );
-          if( Rezultat2 == -1 ) 
+  double stop;
+  double profit;
+  
+  if( ( tip == OP_BUYLIMIT) || ( tip == OP_BUYSTOP ) ) { stop = cena - sl; profit = cena + tp;} else { stop = cena + sl; profit = cena - tp; }
+  do
+   {
+     Rezultat2 = OrderSend( Symbol(), tip,  velikostPozicij, cena, 0, stop, profit,  "DX", 0, 0, Green );
+     if( Rezultat2 == -1 ) 
           { 
             Print( "OdpriDodatniUkaz::NAPAKA: neuspešno odpiranje dodatne pozicije. Ponoven poskus čez 30s..." ); 
             Sleep( 30000 );
             RefreshRates();
           }
-        }
-      while( Rezultat2 == -1 );
-      return( Rezultat2 ); 
     }
+   while( Rezultat2 == -1 );
+   return( Rezultat2 );
 } // OdpriDodatniUkaz
 
 
@@ -515,17 +508,13 @@ Funkcionalnost:
 ---------------
 Funkcija prebere glavne parametre algoritma iz datoteke. Vrstni red branja je naslednji:
 
-int    maxSteviloPozicij;    // Največje število pozicij
-double stopRazdalja;         // Razdalja med pozicijami
+double vmesnaRazdalja;       // Razdalja med pozicijami
 double tpVrednost;           // Profitni cilj (EUR)
-int    uraKonca;             // Ura konca trgovanja
-int    uraZacetka;           // Ura začetka trgovanja
 double velikostPozicij;      // Velikost pozicij (v lotih)
 double izkupicekAlgoritma;   // trenutni izkupiček algoritma
-int    kazOdprtaProdajna;    // kazalec na naslednjo odprto prodajno pozicijo
-int    kazOdprtaNakupna;     // kazalec na naslednjo odprto nakupno pozicijo
+int    kazTrenutnaProdajna;  // kazalec na naslednjo odprto prodajno pozicijo
+int    kazTrenutnaNakupna;   // kazalec na naslednjo odprto nakupno pozicijo
 int    stanje;               // trenutno stanje DKA
-int    steviloPozicij;       // trenutno število pozicij
 int    nakPozicije[MAX_POZ]; // polje id-jev nakupnih pozicij
 int    proPozicije[MAX_POZ]; // polje id-jev prodajnih pozicij
 
@@ -548,7 +537,7 @@ int PreberiStanje( string ime )
   string polnoIme;
   string spisekPozicij;
 
-  polnoIme      = "NS001-" + ime + ".dat";
+  polnoIme      = "VibratorDX-" + ime + ".dat";
   
   // odpremo datoteko
   ResetLastError();
@@ -558,29 +547,21 @@ int PreberiStanje( string ime )
   {
     Print( "Branje stanja algoritma iz datoteke ", polnoIme, ": " );
     Print( "----------------------------------------" );
-    maxSteviloPozicij  = FileReadInteger( rocajDatoteke,    INT_VALUE );
-    Print( "Največje število pozicij [maxSteviloPozicij]: ",       maxSteviloPozicij );
-    stopRazdalja       = FileReadDouble ( rocajDatoteke, DOUBLE_VALUE );
-    Print( "Razdalja med pozicijami [stopRazdalja]: ",                  stopRazdalja );
+    vmesnaRazdalja       = FileReadDouble ( rocajDatoteke, DOUBLE_VALUE );
+    Print( "Razdalja med pozicijami [vmesnaRazdalja]: ",                vmesnaRazdalja );
     tpVrednost         = FileReadDouble ( rocajDatoteke, DOUBLE_VALUE );
-    Print( "Profitni cilj (EUR) [tpVrednost]: ",                          tpVrednost );
-    uraKonca           = FileReadInteger( rocajDatoteke, INT_VALUE    );
-    Print( "Ura konca trgovanja [uraKonca]: ",                              uraKonca );
-    uraZacetka         = FileReadInteger( rocajDatoteke, INT_VALUE    );
-    Print( "Ura začetka trgovanja [uraZacetka]: ",                        uraZacetka );
+    Print( "Profitni cilj (EUR) [tpVrednost]: ",                            tpVrednost );
     velikostPozicij    = FileReadDouble ( rocajDatoteke, DOUBLE_VALUE );
-    Print( "Velikost pozicij (v lotih) [velikostPozicij]: ",         velikostPozicij );
+    Print( "Velikost pozicij (v lotih) [velikostPozicij]: ",           velikostPozicij );
     izkupicekAlgoritma = FileReadDouble ( rocajDatoteke, DOUBLE_VALUE );
-    Print( "Trenutni izkupiček algoritma [izkupicekAlgoritma]: ", izkupicekAlgoritma );
-    kazOdprtaProdajna  = FileReadInteger( rocajDatoteke, INT_VALUE    );
-    Print( "Kazalec na odprto prodajno [kazOdprtaProdajna]: ",     kazOdprtaProdajna );
-    kazOdprtaNakupna   = FileReadInteger( rocajDatoteke, INT_VALUE    );
-    Print( "Kazalec na odprto nakupno [kazOdprtaNakupna]: ",        kazOdprtaNakupna );
+    Print( "Trenutni izkupiček algoritma [izkupicekAlgoritma]: ",   izkupicekAlgoritma );
+    kazTrenutnaProdajna  = FileReadInteger( rocajDatoteke, INT_VALUE    );
+    Print( "Kazalec na trenutno prodajno [kazTrenutnaProdajna]: ", kazTrenutnaProdajna );
+    kazTrenutnaNakupna   = FileReadInteger( rocajDatoteke, INT_VALUE    );
+    Print( "Kazalec na trenutno nakupno [kazTrenutnaNakupna]: ",    kazTrenutnaNakupna );
     stanje             = FileReadInteger( rocajDatoteke, INT_VALUE    );
     Print( "Stanje algoritma [stanje]: ",                                     stanje );
-    steviloPozicij     = FileReadInteger( rocajDatoteke, INT_VALUE    );
-    Print( "Trenutno število pozicij [steviloPozicij]: ",             steviloPozicij );
-        
+
     // polji nakupnih in prodajnih pozicij
     spisekPozicij = "Nakupne pozicije: ";
     for( int i = 0; i < MAX_POZ; i++ )
@@ -597,12 +578,6 @@ int PreberiStanje( string ime )
       if( proPozicije[ j ] != 0 ) { spisekPozicij = spisekPozicij + IntegerToString( proPozicije[ j ] ) + ", "; }
     }
     Print( StringSubstr( spisekPozicij, 0, StringLen( spisekPozicij ) - 2 ) );
- 
-    // dnevni inkrement in aktualna TP vrednost
-    tpInkrement         = FileReadDouble( rocajDatoteke, DOUBLE_VALUE  );
-    Print( "Dnevni inkrement [tpInkrement]: ", tpInkrement );
-    aktualnaTPVrednost  = FileReadDouble( rocajDatoteke, DOUBLE_VALUE  );
-    Print( "Aktualna TP vrednost [aktualnaTPVrednost]: ", aktualnaTPVrednost );
     
     FileClose( rocajDatoteke );
     return( stanje );
@@ -623,17 +598,13 @@ Funkcionalnost:
 ---------------
 Funkcija shrani vse glavne parametre algoritma v datoteko. Vrstni red shranjevanja stanja je naslednji:
 
-int    maxSteviloPozicij;    // Največje število pozicij
-double stopRazdalja;         // Razdalja med pozicijami
+double vmesnaRazdalja;       // Razdalja med pozicijami
 double tpVrednost;           // Profitni cilj (EUR)
-int    uraKonca;             // Ura konca trgovanja
-int    uraZacetka;           // Ura začetka trgovanja
 double velikostPozicij;      // Velikost pozicij (v lotih)
 double izkupicekAlgoritma;   // trenutni izkupiček algoritma
-int    kazOdprtaProdajna;    // kazalec na naslednjo odprto prodajno pozicijo
-int    kazOdprtaNakupna;     // kazalec na naslednjo odprto nakupno pozicijo
+int    kazTrenutnaProdajna;  // kazalec na naslednjo odprto prodajno pozicijo
+int    kazTrenutnaNakupna;   // kazalec na naslednjo odprto nakupno pozicijo
 int    stanje;               // trenutno stanje DKA
-int    steviloPozicij;       // trenutno število pozicij
 int    nakPozicije[MAX_POZ]; // polje id-jev nakupnih pozicij
 int    proPozicije[MAX_POZ]; // polje id-jev prodajnih pozicij
 
@@ -660,34 +631,27 @@ int ShraniStanje( string ime )
   string vrsticaStanja2;
   string vrsticaStanja3;
 
-  polnoIme      = "NS001-" + ime + ".dat";
+  polnoIme      = "VibratorDX-" + ime + ".dat";
   rocajDatoteke = FileOpen( polnoIme, FILE_WRITE|FILE_BIN );
   
   if( rocajDatoteke != INVALID_HANDLE)
   {
     Print( "Zapisovanje stanja algoritma v datoteko ", polnoIme, ": -------------------------------------------------------------------------" );
-    vrsticaStanja1 = "Največje število pozicij [maxSteviloPozicij]: " + IntegerToString( maxSteviloPozicij ) + " \\ ";
-    FileWriteInteger( rocajDatoteke,                               maxSteviloPozicij );
-    vrsticaStanja1 = vrsticaStanja1 + "Razdalja med pozicijami [stopRazdalja]: " + DoubleToString( stopRazdalja, 5 ) + " \\ ";
-    FileWriteDouble ( rocajDatoteke,                                    stopRazdalja );
+    vrsticaStanja1 = vrsticaStanja1 + "Razdalja med pozicijami [vmesnaRazdalja]: " + DoubleToString( vmesnaRazdalja, 5 ) + " \\ ";
+    FileWriteDouble ( rocajDatoteke,                                    vmesnaRazdalja );
     Print( "Profitni cilj (EUR) [tpVrednost]: ", DoubleToString( tpVrednost, 2 ), " EUR" );
     FileWriteDouble ( rocajDatoteke,                                      tpVrednost );
-    vrsticaStanja1 = vrsticaStanja1 + "Ura konca trgovanja [uraKonca]: " + IntegerToString( uraKonca ) + " \\ ";
-    FileWriteInteger( rocajDatoteke,                                        uraKonca );
-    vrsticaStanja1 = vrsticaStanja1 + "Ura začetka trgovanja [uraZacetka]: " + IntegerToString( uraZacetka ) + " \\ ";
-    FileWriteInteger( rocajDatoteke,                                      uraZacetka );
     vrsticaStanja2 = "Velikost pozicij (v lotih) [velikostPozicij]: " + DoubleToString( velikostPozicij, 2 ) + " \\ ";
     FileWriteDouble ( rocajDatoteke,                                 velikostPozicij );
     Print( "Trenutni izkupiček algoritma [izkupicekAlgoritma]: ", DoubleToString( izkupicekAlgoritma, 2 ), " EUR" );
     FileWriteDouble ( rocajDatoteke,                              izkupicekAlgoritma );
-    vrsticaStanja2 = vrsticaStanja2 + "Kazalec na odprto prodajno [kazOdprtaProdajna]: " + IntegerToString( kazOdprtaProdajna ) + " \\ ";
-    FileWriteInteger( rocajDatoteke,                               kazOdprtaProdajna );
-    vrsticaStanja2 = vrsticaStanja2 + "Kazalec na odprto nakupno [kazOdprtaNakupna]: " + IntegerToString( kazOdprtaNakupna ) + " \\ ";
-    FileWriteInteger( rocajDatoteke,                                kazOdprtaNakupna );
+    vrsticaStanja2 = vrsticaStanja2 + "Kazalec na odprto prodajno [kazTrenutnaProdajna]: " + IntegerToString( kazTrenutnaProdajna ) + " \\ ";
+    FileWriteInteger( rocajDatoteke,                               kazTrenutnaProdajna );
+    vrsticaStanja2 = vrsticaStanja2 + "Kazalec na odprto nakupno [kazTrenutnaNakupna]: " + IntegerToString( kazTrenutnaNakupna ) + " \\ ";
+    FileWriteInteger( rocajDatoteke,                                kazTrenutnaNakupna );
     vrsticaStanja3 = "Stanje algoritma [stanje]: " + ImeStanja( stanje ) + " \\ ";
     FileWriteInteger( rocajDatoteke,                                          stanje );
-    vrsticaStanja3 = vrsticaStanja3 + "Trenutno število pozicij [steviloPozicij]: " + IntegerToString( steviloPozicij ) + " \\ ";
-    FileWriteInteger( rocajDatoteke,                                  steviloPozicij );
+
     Print( vrsticaStanja1 );
     Print( vrsticaStanja2 );
     Print( vrsticaStanja3 );
@@ -721,17 +685,10 @@ int ShraniStanje( string ime )
     }
     if( count != 4 ) { Print( StringSubstr( spisekPozicij, 0, StringLen( spisekPozicij ) - 2 ) ); }
     
-    // dnevni inkrement in aktualniTP
-    FileWriteDouble ( rocajDatoteke,                                    tpInkrement );
-    vrsticaStanja1 = "Dnevni inkrement [tpInkrement]: " + DoubleToString( tpInkrement, 2 ) + " EUR" + " \\ ";
-    FileWriteDouble ( rocajDatoteke,                             aktualnaTPVrednost );
-    vrsticaStanja1 = vrsticaStanja1 + "Aktualna TP vrednost [aktualnaTPVrednost]: " + DoubleToString( aktualnaTPVrednost, 2 ) + " EUR";
-    Print( vrsticaStanja1 );
-    
     FileClose( rocajDatoteke );
     return( USPEH );
   }
-  else { Print( "NS001:ShraniStanje: Napaka pri shranjevanju stanja algoritma. Preveri pravilnost delovanja!" ); return( NAPAKA ); } 
+  else { Print( "VibratorDX:ShraniStanje: Napaka pri shranjevanju stanja algoritma. Preveri pravilnost delovanja!" ); return( NAPAKA ); } 
 } // ShraniStanje
 
 
@@ -915,38 +872,21 @@ bool ZapriPozicijo( int Id )
 /*-------------------------------------------------------------------------------------------------------------------------------------------------------
 	Stanje 0 (S0)
 	-------------
-	--> Invariante stanja: 
-	  o odprto je enako število pozicij v obe smeri, 
-		o vse pozicije so še odprte, 
-		o noben stop loss se še ni sprožil.
-	
-	--> Možni prehodi:
-		S0 --> S1: 
-			o pogoj: ko se sproži stop loss na eni od SELL pozicij
-			o akcije pred prehodom:
-				- popravimo trenutno vrednost izkupička algoritma - dodamo vrednost pravkar zaprte pozicije
-				- odpremo stop sell order s ceno vstopa enako kot je bila pri zaprti poziciji
-				- odpremo dodaten stop sell order s ceno vstopa enako kot je bila pri zaprti poziciji, če je odprto število pozicij < maxStevilo pozicij.
-		S0 --> S2:
-			o pogoj: ko se sproži stop loss na eni od BUY pozicij
-			o akcije pred prehodom:
-				- popravimo trenutno vrednost izkupička algoritma - dodamo vrednost pravkar zaprte pozicije
-				- odpremo stop buy order s ceno vstopa enako kot je bila pri zaprti poziciji
-				- odpremo dodaten stop buy order s ceno vstopa enako kot je bila pri zaprti poziciji, če je odprto število pozicij < maxStevilo pozicij.
 */
 int StanjeS0()
 {
-  // S0 --> S1
-  // pozicije so v polju proPozicije urejene po vrsti, če se je sprožil SL, se je sprožil na prvi odprti prodajni poziciji
-  if( PozicijaZaprta( proPozicije[ kazOdprtaProdajna ] ) == true ) 
+  // prodajna pozicija je dosegla TP
+  if( PozicijaZaprta( proPozicije[ kazTrenutnaProdajna ] ) == true ) 
     { 
       // popravimo znesek izkupička algoritma in odpremo nadomestni sell stop order
-      Print("Prodajna pozicija ", kazOdprtaProdajna, " z id-jem ", proPozicije[ kazOdprtaProdajna ], " zaprta - izpolnjen pogoj za prehod v smer nakupa (S1)." );
-      izkupicekAlgoritma = izkupicekAlgoritma + VrednostPozicije( proPozicije[ kazOdprtaProdajna ] ); 
+      Print("Prodajna pozicija ", kazTrenutnaProdajna, " z id-jem ", proPozicije[ kazTrenutnaProdajna ], " zaprta." );
+      izkupicekAlgoritma = izkupicekAlgoritma + VrednostPozicije( proPozicije[ kazTrenutnaProdajna ] ); 
       Print("Trenutni izkupiček algoritma: ", DoubleToStr( izkupicekAlgoritma, 2 ), " EUR" );
-      proPozicije[ kazOdprtaProdajna ] = OdpriNadomestnoPozicijo( proPozicije[ kazOdprtaProdajna ] ); 
+      proPozicije[ kazTrenutnaProdajna ] = OdpriNadomestnoPozicijo( proPozicije[ kazTrenutnaProdajna ] ); 
       if( proPozicije[ kazOdprtaProdajna ] == NAPAKA ) { Print("NAPAKA:S0: Odpiranje nadomestne prodajne pozicije neuspešno." ); }
-      kazOdprtaProdajna++; 
+      kazTrenutnaProdajna--; 
+      
+      
       
       // če število pozicij še ni doseglo maksimuma, potem ga povečamo za ena in dodamo po en dodatni stop order v vsako smer
       if( steviloPozicij < maxSteviloPozicij )
