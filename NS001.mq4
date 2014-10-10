@@ -60,7 +60,7 @@ extern int    zaustavitev;       // 1 - DA, 0 - NE
 
 
 // Globalne konstante -------------------------------------------------------------------------------------------------------------------------------------
-#define MAX_POZ 200 // največje možno število odprtih pozicij v eno smer
+#define MAX_POZ 500 // največje možno število odprtih pozicij v eno smer
 #define S0      10
 #define S4      40
 #define NAPAKA  -1
@@ -74,6 +74,8 @@ int    dan;                  // številka dneva
 double izkupicekAlgoritma;   // trenutni izkupiček algoritma
 int    kazTrenutnaProdajna;  // kazalec na trenutno prodajno pozicijo
 int    kazTrenutnaNakupna;   // kazalec na trenutno nakupno pozicijo
+int    kazZgornjiRob;        // kazalec na zgornji rob
+int    kazSpodnjiRob;        // kazalec na spodnji rob
 int    nakPozicije[MAX_POZ]; // polje id-jev nakupnih pozicij
 int    proPozicije[MAX_POZ]; // polje id-jev prodajnih pozicij
 int    stanje;               // trenutno stanje DKA
@@ -142,13 +144,16 @@ int init()
   Print( "****************************************************************************************************************" );
  
   double cena; 
+  double cenaRavni;
   
   // inicializacija vseh globalnih spremenljivk
   aktualnaTPVrednost  = tpVrednost;
   dan                 = DayOfYear();
   izkupicekAlgoritma  = 0;
-  kazTrenutnaNakupna  = 100;
-  kazTrenutnaProdajna = 100;
+  kazTrenutnaNakupna  = MAXPOZ / 2;
+  kazTrenutnaProdajna = kazTrenutnaNakupna;
+  kazZgornjiRob       = KazTrenutnaNakupna;
+  kazSpodnjiRob       = kazTrenutnaNakupna;
   vrednostPozicij     = 0;
   slRazdalja          = maxSteviloRavni * vmesnaRazdalja;
   tpRazdalja          = vmesnaRazdalja;
@@ -177,27 +182,29 @@ int init()
 	proPozicije[ kazTrenutnaProdajna ] = OdpriPozicijo( OP_SELL, slRazdalja, tpRazdalja  );
 	
 	// ugotovim na kateri ceni je trenutna (začetna raven)
-	cena = CenaOdprtja( nakPozicije[ kazTrenutnaNakupna ] );
+	cena      = CenaOdprtja( nakPozicije[ kazTrenutnaNakupna ] );
 	
 	// odpremo še par vstopnih ukazov eno raven višje
+	cenaRavni = cena + vmesnaRazdalja;
 	nakPozicije[ kazTrenutnaNakupna + 1 ] = OdpriDodatniUkaz( OP_BUY_STOP, 
-		cena + vmesnaRazdalja, 
-		cena - slRazdalja, 
-		cena + ( 2 * vmesnaRazdalja ) );
+		cenaRavni, 
+		cenaRavni - slRazdalja, 
+		cenaRavni + vmesnaRazdalja );
 	proPozicije[ kazTrenutnaProdajna + 1 ] = OdpriDodatniUkaz( OP_SELL_LIMIT,
-		cena + vmesnaRazdalja,
-		cena + slRazdalja,
-		cena - ( 2 * vmesnaRazdalja ) );
+		cenaRavni,
+		cenaRavni + slRazdalja,
+		cenaRavni - vmesnaRazdalja );
 		
 	// ...ter par vstopnih ukazov eno raven nižje
+	cenaRavni = cena - vmesnaRazdalja;
 	nakPozicije[ kazTrenutnaNakupna - 1 ] = OdpriDodatniUkaz( OP_BUY_LIMIT, 
-		cena - vmesnaRazdalja, 
-		cena - ( 2 * vmesnaRazdalja ), 
-		cena );
+		cenaRavni, 
+		cenaRavni - slRazdalja, 
+		cenaRavni + vmesnaRazdalja );
 	proPozicije[ kazTrenutnaProdajna - 1 ] = OdpriDodatniUkaz( OP_SELL_STOP,
-		cena - vmesnaRazdalja,
-		cena + slRazdalja,
-		cena - ( 2 * vmesnaRazdalja ) );
+		cenaRavni,
+		cenaRavni + slRazdalja,
+		cenaRavni - vmesnaRazdalja );
 		
         // PN: opozorilo če pride pri odpiranju pozicije do napake - nadomestimo z bullet proof error handlingom, če bodo testi pokazali profitabilnost
 	if( ( nakPozicije[ kazTrenutnaNakupna ] == NAPAKA ) || ( proPozicije[ kazTrenutnaProdajna ] == NAPAKA ) ) { Print("init: NAPAKA pri odpiranju pozicije ", i ); }
@@ -717,40 +724,6 @@ int ShraniStanje( string ime )
 
 
 /*------------------------------------------------------------------------------------------------------------------------------------------------------
-FUNKCIJA: TrgovalnoObdobje()
-
-Funkcionalnost:
----------------
-Ugotovi ali je trenutni čas znotraj trgovalnega intervala, določenega z vhodnimi parametri algoritma.
-
-Zaloga vrednosti:
------------------
-true : ura je znotraj intervala
-false: ura je zunaj intervala
-
-Vhodni parametri:
------------------
-/
-
-Implementacija: 
---------------- */
-bool TrgovalnoObdobje()
-{
-  datetime cas;
-  int      trenutnaUra;
-  
-  cas            = TimeCurrent();
-  trenutnaUra    = TimeHour( cas );
-  
-  if( ( trenutnaUra    >= uraZacetka    ) && 
-      ( trenutnaUra    <= uraKonca      ) ) 
-      { return( true ); } else { return( false ); }
-  
-} // TrgovalnoObdobje
-
-
-
-/*------------------------------------------------------------------------------------------------------------------------------------------------------
 FUNKCIJA: UkazOdprt( int Id )
 
 Funkcionalnost:
@@ -895,6 +868,12 @@ bool ZapriPozicijo( int Id )
 /*-------------------------------------------------------------------------------------------------------------------------------------------------------
 	Stanje 0 (S0)
 	-------------
+	1) če je trenutna nakupna pozicija dosegla TP, potem:
+	  - prištejemo vrednost pozicije izkupičku algoritma;
+	  - odpremo nadomestni ukaz;
+	  - kazTrenutnaNakupna++;
+	  - kazTrenutnaProdajna
+	2) če je trenutna prodajna pozicija
 */
 int StanjeS0()
 {
