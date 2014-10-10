@@ -141,7 +141,7 @@ int init()
   Print( "* Welcome on behalf of VibratorDX UL1975KX-01/165 Let's f*** and **** the biatch!                                             *" );
   Print( "****************************************************************************************************************" );
  
-  double razdalja; 
+  double cena; 
   
   // inicializacija vseh globalnih spremenljivk
   aktualnaTPVrednost  = tpVrednost;
@@ -152,6 +152,7 @@ int init()
   vrednostPozicij     = 0;
   slRazdalja          = maxSteviloRavni * vmesnaRazdalja;
   tpRazdalja          = vmesnaRazdalja;
+  
 	
 	// če smo algoritem restartali, potem inicializiramo algoritem na podlagi zapisa v datoteki. Po restartu postavimo restart na 0.
 	if( restart == 1 )
@@ -175,7 +176,29 @@ int init()
 	nakPozicije[ kazTrenutnaNakupna  ] = OdpriPozicijo( OP_BUY,  slRazdalja, tpRazdalja  ); 
 	proPozicije[ kazTrenutnaProdajna ] = OdpriPozicijo( OP_SELL, slRazdalja, tpRazdalja  );
 	
+	// ugotovim na kateri ceni je trenutna (začetna raven)
+	cena = CenaOdprtja( nakPozicije[ kazTrenutnaNakupna ] );
+	
+	// odpremo še par vstopnih ukazov eno raven višje
 	nakPozicije[ kazTrenutnaNakupna + 1 ] = OdpriDodatniUkaz( OP_BUY_STOP, 
+		cena + vmesnaRazdalja, 
+		cena - slRazdalja, 
+		cena + ( 2 * vmesnaRazdalja ) );
+	proPozicije[ kazTrenutnaProdajna + 1 ] = OdpriDodatniUkaz( OP_SELL_LIMIT,
+		cena + vmesnaRazdalja,
+		cena + slRazdalja,
+		cena - ( 2 * vmesnaRazdalja ) );
+		
+	// ...ter par vstopnih ukazov eno raven nižje
+	nakPozicije[ kazTrenutnaNakupna - 1 ] = OdpriDodatniUkaz( OP_BUY_LIMIT, 
+		cena - vmesnaRazdalja, 
+		cena - ( 2 * vmesnaRazdalja ), 
+		cena );
+	proPozicije[ kazTrenutnaProdajna - 1 ] = OdpriDodatniUkaz( OP_SELL_STOP,
+		cena - vmesnaRazdalja,
+		cena + slRazdalja,
+		cena - ( 2 * vmesnaRazdalja ) );
+		
         // PN: opozorilo če pride pri odpiranju pozicije do napake - nadomestimo z bullet proof error handlingom, če bodo testi pokazali profitabilnost
 	if( ( nakPozicije[ kazTrenutnaNakupna ] == NAPAKA ) || ( proPozicije[ kazTrenutnaProdajna ] == NAPAKA ) ) { Print("init: NAPAKA pri odpiranju pozicije ", i ); }
 
